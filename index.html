@@ -1,0 +1,751 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>m-king · 麦门总管</title>
+<style>
+  :root{
+    --mcd-red:#DA291C;
+    --mcd-red-dark:#8E1A10;
+    --mcd-yellow:#FFC72C;
+    --mcd-yellow-dark:#E0A800;
+    --ink:#2C2C2A;
+    --ink-2:#6B6560;
+    --ink-3:#A79B92;
+    --line:#F0E2D8;
+    --card:#FFFFFF;
+    --page:#FDF6EF;
+    --ok:#1E8E5A;
+    --warn:#C77700;
+    --bad:#C0392B;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    background:var(--page);color:var(--ink);min-height:100vh;
+    padding:26px 30px 40px;-webkit-font-smoothing:antialiased;
+  }
+  button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
+
+  /* ---------------- header ---------------- */
+  header{
+    display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;
+    padding-bottom:18px;border-bottom:1px solid var(--line);margin-bottom:26px;
+  }
+  .brand{display:flex;align-items:center;gap:14px}
+  .brand .logo{width:46px;height:46px;border-radius:12px;background:var(--mcd-red);display:grid;place-items:center;flex:0 0 auto}
+  .brand h1{font-size:20px;font-weight:600;letter-spacing:.3px}
+  .brand p{font-size:12.5px;color:var(--ink-2);margin-top:3px}
+  .status{
+    display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--ink-2);
+    background:#fff;border:1px solid var(--line);border-radius:999px;padding:7px 14px;
+  }
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--ink-3);flex:0 0 auto}
+  .dot.live{background:var(--ok);box-shadow:0 0 0 3px rgba(30,142,90,.16)}
+  .dot.err{background:var(--bad);box-shadow:0 0 0 3px rgba(192,57,43,.16)}
+
+  /* ---------------- stage ---------------- */
+  .stage{display:grid;grid-template-columns:1fr minmax(340px,392px) 1fr;gap:24px;align-items:start}
+  .wing{display:flex;flex-direction:column;gap:14px;padding-top:40px}
+
+  /* ---------------- cards ---------------- */
+  .card{
+    background:var(--card);border:1px solid var(--line);border-radius:14px;
+    padding:14px 16px;cursor:pointer;position:relative;overflow:hidden;text-align:left;width:100%;
+    transition:transform .16s ease, box-shadow .16s ease, border-color .16s ease;
+  }
+  .card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--mcd-yellow);transition:width .18s ease}
+  .wing.right .card::before{background:var(--mcd-red)}
+  .card:hover{transform:translateY(-2px);box-shadow:0 10px 22px rgba(180,120,80,.14);border-color:#E6D2C4}
+  .card:hover::before{width:6px}
+  .card:active{transform:translateY(0)}
+  .card:disabled{cursor:wait;opacity:.85}
+  .card .row{display:flex;align-items:center;gap:10px}
+  .card .ico{width:32px;height:32px;border-radius:9px;flex:0 0 auto;background:#FFF4D6;display:grid;place-items:center}
+  .wing.right .card .ico{background:#FDE7E5}
+  .card h3{font-size:14.5px;font-weight:600}
+  .card .desc{font-size:12.5px;line-height:1.65;color:var(--ink-2);margin:9px 0 0 42px}
+  .card .cue{
+    font-size:11.5px;color:#B08A6A;margin:9px 0 0 42px;
+    display:flex;align-items:center;gap:5px;opacity:.9;
+  }
+  .card .cue .live-dot{width:5px;height:5px;border-radius:50%;background:var(--ok);display:inline-block}
+  .card.busy .cue{color:var(--mcd-red)}
+  .card .sweep{
+    position:absolute;top:0;left:-40%;width:40%;height:100%;pointer-events:none;opacity:0;
+    background:linear-gradient(100deg,transparent,rgba(255,199,44,.38),transparent);
+  }
+  .card.busy .sweep{opacity:1;animation:sweep 1.1s linear infinite}
+  @keyframes sweep{0%{left:-40%}100%{left:120%}}
+
+  /* ---------------- center gate ---------------- */
+  .gate{display:flex;flex-direction:column;align-items:center;text-align:center}
+  .gate .house{width:100%;max-width:352px;filter:drop-shadow(0 14px 26px rgba(180,120,80,.16))}
+  .gate .tagline{margin-top:4px;font-size:12.5px;color:var(--ink-2);letter-spacing:.4px}
+  .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;width:100%;margin-top:18px}
+  .stat{background:#fff;border:1px solid var(--line);border-radius:12px;padding:11px 9px}
+  .stat .k{font-size:11px;color:var(--ink-2);letter-spacing:.3px}
+  .stat .v{font-size:19px;font-weight:600;margin-top:5px;font-variant-numeric:tabular-nums}
+  .stat .v small{font-size:11px;font-weight:400;color:var(--ink-2);margin-left:2px}
+  .stat.warn .v{color:var(--bad)}
+  .stat .v.skeleton{background:#F2EAE2;border-radius:6px;color:transparent;width:56px;height:22px;margin-top:7px}
+  .today{width:100%;margin-top:14px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:13px 15px;text-align:left}
+  .today .hd{font-size:11.5px;color:var(--ink-2);letter-spacing:.4px;margin-bottom:9px;display:flex;justify-content:space-between}
+  .today ul{list-style:none;display:flex;flex-direction:column;gap:7px}
+  .today li{font-size:12.5px;line-height:1.5;display:flex;gap:8px;align-items:baseline}
+  .today li i{width:5px;height:5px;border-radius:50%;background:var(--mcd-yellow);flex:0 0 auto;transform:translateY(-2px)}
+  .today .muted{font-size:12px;color:var(--ink-3)}
+
+  footer{margin-top:32px;padding-top:16px;border-top:1px solid var(--line);font-size:11.5px;color:var(--ink-3);text-align:center;line-height:1.8}
+  footer b{color:var(--ink-2);font-weight:500}
+
+  /* ---------------- overlay : 推门进殿 ---------------- */
+  #overlay{position:fixed;inset:0;z-index:50;display:none;overflow:hidden}
+  #overlay.open{display:block}
+  .ov-bg{position:absolute;inset:0;background:radial-gradient(120% 90% at 50% 0%,#7E1A11 0%,#4A0E08 60%,#2A0704 100%)}
+
+  /* 两扇门 */
+  .door{position:absolute;top:0;bottom:0;width:50.4%;background:linear-gradient(180deg,#B6231A,#8E1A10 60%,#6E1109);
+    transition:transform .78s cubic-bezier(.72,0,.24,1);will-change:transform}
+  .door::after{content:"";position:absolute;inset:0;opacity:.5;
+    background:repeating-linear-gradient(90deg,rgba(0,0,0,.16) 0 1px,transparent 1px 54px)}
+  .door.left{left:0;box-shadow:inset -22px 0 34px rgba(0,0,0,.42)}
+  .door.right{right:0;box-shadow:inset 22px 0 34px rgba(0,0,0,.42)}
+  .door .stud{position:absolute;width:13px;height:13px;border-radius:50%;
+    background:radial-gradient(circle at 34% 30%,#FFE08A,#D9A013);opacity:.9}
+  #overlay.through .door.left{transform:translateX(-101%)}
+  #overlay.through .door.right{transform:translateX(101%)}
+  .door-hint{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);text-align:center;color:#FFE9A8;
+    transition:opacity .3s ease;z-index:2}
+  .door-hint .big{font-size:15px;letter-spacing:3px;font-weight:600}
+  .door-hint .sm{font-size:12px;margin-top:10px;color:#E8C58B;letter-spacing:.6px}
+  .door-hint .spinner{width:30px;height:30px;margin:16px auto 0;border-radius:50%;
+    border:2.5px solid rgba(255,199,44,.22);border-top-color:var(--mcd-yellow);animation:spin .85s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  #overlay.through .door-hint{opacity:0}
+
+  /* 殿内面板 */
+  .hall{position:absolute;inset:0;display:flex;justify-content:center;padding:26px 20px 30px;
+    overflow:auto;opacity:0;transform:translateY(26px) scale(.985);
+    transition:opacity .45s ease .28s, transform .5s cubic-bezier(.2,.8,.25,1) .28s}
+  #overlay.through .hall{opacity:1;transform:none}
+  .panel{width:100%;max-width:1000px;background:var(--page);border-radius:18px;overflow:hidden;
+    box-shadow:0 30px 70px rgba(0,0,0,.5);align-self:flex-start}
+
+  .p-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;
+    background:linear-gradient(135deg,#DA291C,#A61E13);color:#fff;padding:20px 24px}
+  .p-head h2{font-size:19px;font-weight:600;letter-spacing:.3px;display:flex;align-items:center;gap:9px}
+  .p-head .sub{font-size:12.5px;opacity:.9;margin-top:6px;line-height:1.6}
+  .p-head .acts{display:flex;gap:8px;flex:0 0 auto}
+  .p-head .acts button{background:rgba(255,255,255,.16);color:#fff;border-radius:9px;padding:8px 13px;font-size:12.5px;
+    transition:background .15s ease;white-space:nowrap}
+  .p-head .acts button:hover{background:rgba(255,255,255,.3)}
+  .p-body{padding:20px 24px 26px;display:flex;flex-direction:column;gap:16px}
+
+  /* 数据链路 */
+  .chain{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+  .chain .hd{font-size:11.5px;color:var(--ink-2);margin-bottom:9px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px}
+  .chain .steps{display:flex;flex-wrap:wrap;gap:7px}
+  .chip{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;border-radius:999px;padding:5px 11px;
+    background:#F6FBF7;border:1px solid #DCEFE3;color:#1E6B45;font-variant-numeric:tabular-nums}
+  .chip.fail{background:#FDF0EE;border-color:#F6D9D5;color:#B03225}
+  .chip .t{opacity:.62}
+
+  /* blocks */
+  .hero{background:linear-gradient(135deg,#FFF9E8,#FFF3D6);border:1px solid #F3E0AE;border-radius:14px;padding:18px 20px}
+  .hero .t{font-size:12px;color:#8A6A22;letter-spacing:.4px}
+  .hero .n{font-size:42px;font-weight:700;line-height:1.12;margin-top:8px;font-variant-numeric:tabular-nums;letter-spacing:-1px}
+  .hero .n u{font-size:15px;font-weight:500;text-decoration:none;color:#8A6A22;margin-left:8px;letter-spacing:0}
+  .hero .s{font-size:12.5px;color:#7A5C18;margin-top:10px;line-height:1.65}
+  .hero.bad{background:linear-gradient(135deg,#FDF1EF,#FBE4E0);border-color:#F3CFC9}
+  .hero.bad .t,.hero.bad .n u,.hero.bad .s{color:#9E2A1E}
+  .hero.bad .n{color:#C0392B}
+  .hero.ok{background:linear-gradient(135deg,#F1FAF4,#E4F5EB);border-color:#CDEAD8}
+  .hero.ok .t,.hero.ok .n u,.hero.ok .s{color:#1B6B45}
+  .hero.ok .n{color:#177A4A}
+
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(158px,1fr));gap:10px}
+  .kpi{background:#fff;border:1px solid var(--line);border-radius:12px;padding:13px 14px}
+  .kpi .k{font-size:11.5px;color:var(--ink-2)}
+  .kpi .v{font-size:20px;font-weight:600;margin-top:6px;font-variant-numeric:tabular-nums;line-height:1.25}
+  .kpi .v u{font-size:11.5px;font-weight:400;color:var(--ink-2);text-decoration:none;margin-left:3px}
+  .kpi .h{font-size:11px;color:var(--ink-3);margin-top:5px;line-height:1.5}
+  .kpi.ok .v{color:var(--ok)} .kpi.warn .v{color:var(--warn)} .kpi.bad .v{color:var(--bad)}
+
+  .blk{background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  .blk .bh{font-size:12.5px;font-weight:600;padding:12px 15px;border-bottom:1px solid var(--line);background:#FFFCF8;
+    display:flex;justify-content:space-between;align-items:center;gap:10px}
+  .blk .bh span{font-size:11px;font-weight:400;color:var(--ink-3)}
+  .tw{overflow-x:auto}
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  th{text-align:left;font-weight:500;color:var(--ink-2);font-size:11.5px;padding:9px 15px;background:#FFFCF8;
+    border-bottom:1px solid var(--line);white-space:nowrap}
+  td{padding:10px 15px;border-bottom:1px solid #F7F1EB;line-height:1.55;vertical-align:top}
+  tr:last-child td{border-bottom:none}
+  tbody tr:hover{background:#FFFDF9}
+  td:first-child{font-weight:500}
+
+  .bars{display:flex;flex-direction:column;gap:2px;padding:6px 0}
+  .bar{display:grid;grid-template-columns:minmax(96px,34%) 1fr auto;gap:11px;align-items:center;padding:7px 15px}
+  .bar .lb{font-size:12px;line-height:1.4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .bar .lb i{display:block;font-style:normal;font-size:10.5px;color:var(--ink-3);margin-top:2px}
+  .bar .tk{height:9px;border-radius:5px;background:#F4EDE6;overflow:hidden}
+  .bar .fl{height:100%;border-radius:5px;background:linear-gradient(90deg,#FFD65C,#E0A800);
+    width:0;transition:width .7s cubic-bezier(.2,.8,.25,1)}
+  .bar.ok .fl{background:linear-gradient(90deg,#6ED39B,#1E8E5A)}
+  .bar.bad .fl{background:linear-gradient(90deg,#EE8B7E,#C0392B)}
+  .bar .vl{font-size:12px;font-variant-numeric:tabular-nums;color:var(--ink-2);white-space:nowrap;text-align:right}
+
+  .rows{display:flex;flex-direction:column}
+  .r{display:flex;flex-direction:column;gap:3px;padding:11px 15px;border-bottom:1px solid #F7F1EB}
+  .r:last-child{border-bottom:none}
+  .r .rt{font-size:12.5px;font-weight:500;display:flex;align-items:center;gap:7px}
+  .r .rm{font-size:11.5px;color:var(--ink-2);line-height:1.55}
+  .r .bdg{width:6px;height:6px;border-radius:50%;background:var(--mcd-yellow);flex:0 0 auto}
+  .r.warn .bdg{background:var(--warn)} .r.ok .bdg{background:var(--ok)} .r.bad .bdg{background:var(--bad)}
+
+  .note{font-size:12.5px;line-height:1.72;border-radius:12px;padding:13px 15px;
+    background:#F8FAFB;border:1px solid #E4EDF2;color:#3F5560}
+  .note.warn{background:#FFF9EC;border-color:#F5E3B8;color:#7A5A11}
+  .note.bad{background:#FDF1EF;border-color:#F3CFC9;color:#8E2A1E}
+  .note.info{background:#F6F9FC;border-color:#E1EAF2;color:#3F5560}
+
+  .empty{padding:40px;text-align:center;color:var(--ink-2);font-size:13px}
+  .spin-line{display:flex;align-items:center;gap:9px;font-size:12.5px;color:var(--ink-2);padding:4px 0}
+  .spin-line .sp{width:13px;height:13px;border-radius:50%;border:2px solid #EADFD4;border-top-color:var(--mcd-red);animation:spin .8s linear infinite}
+
+  @media (max-width:1080px){
+    body{padding:18px}
+    .stage{grid-template-columns:1fr;gap:18px}
+    .wing{padding-top:0;order:2}
+    .wing.right{order:3}
+    .gate{order:1}
+    .hall{padding:12px 8px 20px}
+    .p-body{padding:16px}
+    .hero .n{font-size:34px}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <div class="logo">
+      <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true">
+        <path d="M4 21 L4 12.5 C4 6.8 6.6 4 9 4 C11.4 4 12.2 6.2 12.2 8.6 L12.2 21" fill="none" stroke="#FFC72C" stroke-width="2.6" stroke-linecap="round"/>
+        <path d="M12.2 21 L12.2 8.6 C12.2 6.2 13 4 15.4 4 C17.8 4 20.4 6.8 20.4 12.5 L20.4 21" fill="none" stroke="#FFC72C" stroke-width="2.6" stroke-linecap="round"/>
+        <rect x="2.6" y="20.6" width="18.6" height="2.4" rx="1.2" fill="#FFC72C"/>
+      </svg>
+    </div>
+    <div>
+      <h1>m-king · 麦门总管</h1>
+      <p>推门即执行 · 六个麦门技能跑在真实麦当劳 MCP 上</p>
+    </div>
+  </div>
+  <div class="status"><span class="dot" id="dot"></span><span id="statusText">正在连接麦当劳 MCP…</span></div>
+</header>
+
+<main class="stage">
+
+  <section class="wing left" aria-label="左侧功能">
+    <button class="card" data-mode="mci-index">
+      <span class="sweep"></span>
+      <div class="row">
+        <div class="ico">
+          <svg width="17" height="17" viewBox="0 0 17 17"><path d="M1.5 13.5 L5.4 8.6 L8.6 11 L15.5 3" fill="none" stroke="#E0A800" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><circle cx="5.4" cy="8.6" r="1.2" fill="#E0A800"/><circle cx="8.6" cy="11" r="1.2" fill="#E0A800"/></svg>
+        </div>
+        <h3>中国麦价指数 McIndex</h3>
+      </div>
+      <p class="desc">拉真实门店菜单，算出「主食+小食+饮品」三件套的本期麦价读数，附折扣力度榜。</p>
+      <div class="cue"><span class="live-dot"></span>点击立即执行 · 结果就地呈现</div>
+    </button>
+
+    <button class="card" data-mode="annual-report">
+      <span class="sweep"></span>
+      <div class="row">
+        <div class="ico">
+          <svg width="17" height="17" viewBox="0 0 17 17"><path d="M4 1.8 h9 v13.4 l-1.5-1.1 -1.5 1.1 -1.5-1.1 -1.5 1.1 -1.5-1.1 -1.5 1.1 Z" fill="none" stroke="#E0A800" stroke-width="1.5" stroke-linejoin="round"/><path d="M6.2 5.4 h4.6 M6.2 8.2 h4.6" stroke="#E0A800" stroke-width="1.4" stroke-linecap="round"/></svg>
+        </div>
+        <h3>麦当劳年度账单</h3>
+      </div>
+      <p class="desc">用历史订单 + 官方营养表，算出这一年吃了多少顿、花了多少钱、摄入了多少热量。</p>
+      <div class="cue"><span class="live-dot"></span>点击立即执行 · 结果就地呈现</div>
+    </button>
+
+    <button class="card" data-mode="points-advisor">
+      <span class="sweep"></span>
+      <div class="row">
+        <div class="ico">
+          <svg width="17" height="17" viewBox="0 0 17 17"><circle cx="8.5" cy="8.5" r="6.7" fill="none" stroke="#E0A800" stroke-width="1.5"/><circle cx="8.5" cy="8.5" r="3" fill="none" stroke="#E0A800" stroke-width="1.5"/></svg>
+        </div>
+        <h3>积分理财师</h3>
+      </div>
+      <p class="desc">把商城兑换券按「每一分能换多少钱」排序，算出你的积分到底该怎么花才不浪费。</p>
+      <div class="cue"><span class="live-dot"></span>点击立即执行 · 结果就地呈现</div>
+    </button>
+  </section>
+
+  <section class="gate" aria-label="金拱门">
+    <svg class="house" viewBox="0 0 360 372" role="img" aria-label="金拱门宫门">
+      <title>金拱门宫门</title>
+      <desc>一座中式宫门造型的麦当劳大房子，朱红墙体配金黄琉璃屋顶，正门是发光的金拱。</desc>
+      <defs>
+        <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFD65C"/><stop offset="1" stop-color="#F0B21A"/></linearGradient>
+        <radialGradient id="glow" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#FFE9A8" stop-opacity=".85"/><stop offset="1" stop-color="#FFE9A8" stop-opacity="0"/></radialGradient>
+      </defs>
+      <ellipse cx="180" cy="300" rx="120" ry="70" fill="url(#glow)"/>
+      <rect x="46" y="348" width="268" height="13" rx="4" fill="#EFE3D6"/>
+      <rect x="64" y="336" width="232" height="13" rx="4" fill="#E6D7C7"/>
+      <rect x="80" y="202" width="200" height="136" fill="#DA291C"/>
+      <rect x="80" y="202" width="200" height="10" fill="#F6E2C4" opacity="0.85"/>
+      <rect x="80" y="202" width="200" height="136" fill="none" stroke="#A61E13" stroke-width="1.5"/>
+      <rect x="90" y="222" width="17" height="26" rx="2" fill="#FFC72C" opacity="0.9"/>
+      <rect x="253" y="222" width="17" height="26" rx="2" fill="#FFC72C" opacity="0.9"/>
+      <rect x="150" y="218" width="60" height="24" rx="3" fill="url(#gold)" stroke="#D9A013" stroke-width="1"/>
+      <text x="180" y="235" text-anchor="middle" font-size="14" font-weight="700" fill="#A61E13" font-family="-apple-system,PingFang SC,sans-serif">M</text>
+      <path d="M118 338 L118 286 C118 254 130 238 148 238 C166 238 178 254 178 286 L178 338" fill="none" stroke="url(#gold)" stroke-width="17" stroke-linecap="round"/>
+      <path d="M182 338 L182 286 C182 254 194 238 212 238 C230 238 242 254 242 286 L242 338" fill="none" stroke="url(#gold)" stroke-width="17" stroke-linecap="round"/>
+      <path d="M300 202 L316 190 L262 156 L98 156 L44 190 L60 202 Z" fill="url(#gold)" stroke="#D9A013" stroke-width="1"/>
+      <path d="M252 156 L268 146 L216 112 L144 112 L92 146 L108 156 Z" fill="url(#gold)" stroke="#D9A013" stroke-width="1"/>
+      <rect x="146" y="106" width="68" height="9" rx="4" fill="#E0A800"/>
+      <circle cx="180" cy="101" r="5" fill="#FFC72C" stroke="#D9A013" stroke-width="1"/>
+    </svg>
+
+    <div class="tagline" id="tagline">金拱门两侧各守三门 —— 点任意一门，当场执行给你看</div>
+
+    <div class="stats" id="stats">
+      <div class="stat"><div class="k">可用积分</div><div class="v skeleton">&nbsp;</div></div>
+      <div class="stat"><div class="k">券包券数</div><div class="v skeleton">&nbsp;</div></div>
+      <div class="stat warn"><div class="k">已过期积分</div><div class="v skeleton">&nbsp;</div></div>
+    </div>
+
+    <div class="today" id="today">
+      <div class="hd"><span>今日活动速览</span><span id="todayDate"></span></div>
+      <div class="spin-line"><span class="sp"></span>正在读取活动日历…</div>
+    </div>
+  </section>
+
+  <section class="wing right" aria-label="右侧功能">
+    <button class="card" data-mode="fulfillment-compare">
+      <span class="sweep"></span>
+      <div class="row">
+        <div class="ico">
+          <svg width="17" height="17" viewBox="0 0 17 17"><path d="M8.5 2 L8.5 15 M3 5 L14 5 M3 12 L14 12" stroke="#C0392B" stroke-width="1.5" stroke-linecap="round"/><path d="M3 5 L1.6 8 M14 5 L15.4 8 M3 12 L1.6 9 M14 12 L15.4 9" stroke="#C0392B" stroke-width="1.4" stroke-linecap="round"/></svg>
+        </div>
+        <h3>三路比价器</h3>
+      </div>
+      <p class="desc">同一份餐，分别按到店自取、得来速、麦乐送真实算价（含配送费），告诉你走哪条路最省。</p>
+      <div class="cue"><span class="live-dot"></span>点击立即执行 · 结果就地呈现</div>
+    </button>
+
+    <button class="card" data-mode="coupon-lifecycle">
+      <span class="sweep"></span>
+      <div class="row">
+        <div class="ico">
+          <svg width="17" height="17" viewBox="0 0 17 17"><path d="M1.8 5.6 h13.4 v3 a1.7 1.7 0 0 0 0 3.4 v0.4 H1.8 v-0.4 a1.7 1.7 0 0 0 0-3.4 Z" fill="none" stroke="#C0392B" stroke-width="1.4" stroke-linejoin="round"/><path d="M9.6 5.6 v10.8" stroke="#C0392B" stroke-width="1.2" stroke-dasharray="1.8 1.6"/></svg>
+        </div>
+        <h3>券生命周期管家</h3>
+      </div>
+      <p class="desc">把每张券和菜单价对上，算出「这张券值多少钱」，并按到期紧急度排出使用顺序。</p>
+      <div class="cue"><span class="live-dot"></span>点击立即执行 · 结果就地呈现</div>
+    </button>
+
+    <button class="card" data-mode="calorie-coach">
+      <span class="sweep"></span>
+      <div class="row">
+        <div class="ico">
+          <svg width="17" height="17" viewBox="0 0 17 17"><path d="M8.5 15 C5 15 3 12.4 3 9.6 C3 7 4.6 5.4 5.4 3.4 C6.2 5 7 5.6 7.8 6.2 C7.4 4.4 7.8 2.6 9.4 1.6 C9.4 3.6 10.6 4.4 11.6 5.8 C12.6 7.2 14 8.4 14 10.4 C14 13 11.6 15 8.5 15 Z" fill="none" stroke="#C0392B" stroke-width="1.4" stroke-linejoin="round"/></svg>
+        </div>
+        <h3>热量预算教练</h3>
+      </div>
+      <p class="desc">给定热量预算和价格上限，穷举本店在售餐品的全部可行组合，再折算成"要跑几公里"。</p>
+      <div class="cue"><span class="live-dot"></span>点击立即执行 · 结果就地呈现</div>
+    </button>
+  </section>
+
+</main>
+
+<footer>
+  m-king v1.0 · <b>WorkBuddy Skill + 本地可视化入口</b> · 数据来自麦当劳中国 MCP（open.mcd.cn/mcp）<br>
+  点击卡片即刻执行真实 MCP 调用链，结果直接渲染在本页 —— 不复制、不跳转、不粘贴。
+</footer>
+
+<!-- 推门进殿 -->
+<div id="overlay" aria-hidden="true">
+  <div class="ov-bg"></div>
+  <div class="door left" id="doorL"></div>
+  <div class="door right" id="doorR"></div>
+  <div class="door-hint" id="doorHint">
+    <div class="big" id="hintTitle">推 门 进 殿</div>
+    <div class="spinner"></div>
+    <div class="sm" id="hintSub">正在执行真实 MCP 调用链…</div>
+  </div>
+  <div class="hall" id="hall"></div>
+</div>
+
+<script>
+/* ============================================================
+ * m-king 前端
+ * 只做两件事：把点击发出去，把结果画出来。
+ * 所有业务计算都在 server.js 侧完成（lib/modes.js）。
+ * ========================================================== */
+
+var API = {
+  status:    '/api/status',
+  dashboard: '/api/dashboard',
+  run:       '/api/run'
+};
+
+/* 每个模式声明自己会走的链路，仅用于加载时的进度提示 */
+var CHAIN_HINT = {
+  'mci-index':           ['now-time-info', 'query-nearby-stores', 'query-meals'],
+  'annual-report':       ['order-list', 'list-nutrition-foods'],
+  'points-advisor':      ['query-my-account', 'mall-points-products', 'query-lottery-info'],
+  'fulfillment-compare': ['query-nearby-stores', 'delivery-query-stores', 'query-meals', 'calculate-price'],
+  'coupon-lifecycle':    ['available-coupons', 'query-my-coupons', 'query-meals'],
+  'calorie-coach':       ['list-nutrition-foods', 'query-nearby-stores', 'query-meals']
+};
+
+var MODE_NAME = {
+  'mci-index': '中国麦价指数 McIndex',
+  'annual-report': '麦当劳年度账单',
+  'points-advisor': '积分理财师',
+  'fulfillment-compare': '三路比价器',
+  'coupon-lifecycle': '券生命周期管家',
+  'calorie-coach': '热量预算教练'
+};
+
+var $  = function (s) { return document.querySelector(s); };
+var $$ = function (s) { return Array.prototype.slice.call(document.querySelectorAll(s)); };
+
+function el(tag, cls, html) {
+  var n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (html != null) n.innerHTML = html;
+  return n;
+}
+function esc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+/* ---------------- 顶部状态 ---------------- */
+function setStatus(state, text) {
+  var dot = $('#dot');
+  dot.className = 'dot' + (state === 'live' ? ' live' : (state === 'err' ? ' err' : ''));
+  $('#statusText').textContent = text;
+}
+
+/* ---------------- 首页看板（真实数据） ---------------- */
+function loadDashboard() {
+  fetch(API.dashboard)
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      if (!d.ok) throw new Error(d.error || '看板加载失败');
+      var a = d.account;
+      $('#stats').innerHTML =
+        '<div class="stat"><div class="k">可用积分</div><div class="v">' + a.available.toFixed(1) + '<small>分</small></div></div>' +
+        '<div class="stat"><div class="k">券包券数</div><div class="v">' + d.coupons.total + '<small>张</small></div>' +
+          (d.coupons.soon ? '<div class="k" style="margin-top:4px;color:#C77700">' + d.coupons.soon + ' 张 3 天内到期</div>' : '') + '</div>' +
+        '<div class="stat ' + (a.expired > 0 ? 'warn' : '') + '"><div class="k">已过期积分</div><div class="v">' + a.expired.toFixed(1) + '<small>分</small></div></div>';
+
+      $('#todayDate').textContent = String(d.time || '').slice(0, 10);
+      var box = $('#today');
+      if (d.events && d.events.length) {
+        box.innerHTML = '<div class="hd"><span>今日活动速览 · 实时</span><span>' + esc(String(d.time || '').slice(0, 10)) + '</span></div><ul>' +
+          d.events.slice(0, 6).map(function (e) {
+            return '<li><i></i><span><b style="font-weight:600">' + esc(e.title) + '</b>' +
+              (e.highlight ? ' · ' + esc(e.highlight) : '') +
+              (e.price ? ' · <span style="color:#B03225">' + esc(e.price) + '</span>' : '') +
+              (e.action ? ' · <span style="color:#B08A6A">' + esc(e.action) + '</span>' : '') + '</span></li>';
+          }).join('') + '</ul>';
+      } else {
+        box.innerHTML = '<div class="hd"><span>今日活动速览</span><span></span></div><div class="muted">今天没有读到进行中的活动条目。</div>';
+      }
+
+      if (d.store) $('#tagline').textContent = '当前基准门店：' + d.store.name + '（收藏门店 ' + d.store.count + ' 家）';
+    })
+    .catch(function (e) {
+      $('#today').innerHTML = '<div class="hd"><span>今日活动速览</span></div><div class="muted">读取失败：' + esc(e.message) + '</div>';
+    });
+}
+
+/* ---------------- block 渲染器 ---------------- */
+function renderBlock(b) {
+  if (!b) return null;
+
+  if (b.type === 'hero') {
+    var h = el('div', 'hero' + (b.tone === 'bad' ? ' bad' : (b.tone === 'ok' ? ' ok' : '')));
+    h.innerHTML = '<div class="t">' + esc(b.title) + '</div>' +
+      '<div class="n">' + esc(b.big) + (b.unit ? '<u>' + esc(b.unit) + '</u>' : '') + '</div>' +
+      (b.sub ? '<div class="s">' + esc(b.sub) + '</div>' : '');
+    return h;
+  }
+
+  if (b.type === 'kpi') {
+    var g = el('div', 'kpis');
+    (b.items || []).forEach(function (i) {
+      var tone = i.tone === 'ok' ? ' ok' : (i.tone === 'warn' ? ' warn' : (i.tone === 'bad' ? ' bad' : ''));
+      g.appendChild(el('div', 'kpi' + tone,
+        '<div class="k">' + esc(i.label) + '</div>' +
+        '<div class="v">' + esc(i.value) + (i.unit ? '<u>' + esc(i.unit) + '</u>' : '') + '</div>' +
+        (i.hint ? '<div class="h">' + esc(i.hint) + '</div>' : '')));
+    });
+    return g;
+  }
+
+  if (b.type === 'table') {
+    var box = el('div', 'blk');
+    box.appendChild(el('div', 'bh', '<span>' + esc(b.title) + '</span><span>' + (b.rows || []).length + ' 行</span>'));
+    var wrap = el('div', 'tw');
+    var t = el('table');
+    t.innerHTML = '<thead><tr>' + (b.cols || []).map(function (c) { return '<th>' + esc(c) + '</th>'; }).join('') + '</tr></thead>' +
+      '<tbody>' + (b.rows || []).map(function (r) {
+        return '<tr>' + r.map(function (c) { return '<td>' + esc(c) + '</td>'; }).join('') + '</tr>';
+      }).join('') + '</tbody>';
+    wrap.appendChild(t); box.appendChild(wrap);
+    return box;
+  }
+
+  if (b.type === 'bars') {
+    var bx = el('div', 'blk');
+    var items = b.items || [];
+    bx.appendChild(el('div', 'bh', '<span>' + esc(b.title) + '</span><span>' + items.length + ' 项</span>'));
+    var list = el('div', 'bars');
+    if (!items.length) { list.appendChild(el('div', 'empty', '没有可展示的数据')); }
+    var max = items.reduce(function (m, i) { return Math.max(m, Number(i.value) || 0); }, 0) || 1;
+    items.forEach(function (i) {
+      var tone = i.tone === 'ok' ? ' ok' : (i.tone === 'bad' ? ' bad' : '');
+      var row = el('div', 'bar' + tone);
+      var pct = Math.max(2, (Number(i.value) || 0) / max * 100);
+      row.innerHTML =
+        '<div class="lb" title="' + esc(i.label) + '">' + esc(i.label) + (i.sub ? '<i>' + esc(i.sub) + '</i>' : '') + '</div>' +
+        '<div class="tk"><div class="fl" data-w="' + pct.toFixed(1) + '"></div></div>' +
+        '<div class="vl">' + esc(i.display != null ? i.display : i.value) + '</div>';
+      list.appendChild(row);
+    });
+    bx.appendChild(list);
+    // 入场后再动画宽度，做出"生长"效果
+    requestAnimationFrame(function () {
+      $$('.bar .fl').forEach(function (f) { f.style.width = f.getAttribute('data-w') + '%'; });
+    });
+    return bx;
+  }
+
+  if (b.type === 'list') {
+    var lb = el('div', 'blk');
+    var its = b.items || [];
+    lb.appendChild(el('div', 'bh', '<span>' + esc(b.title) + '</span><span>' + its.length + ' 条</span>'));
+    var rw = el('div', 'rows');
+    if (!its.length) rw.appendChild(el('div', 'empty', '没有数据'));
+    its.forEach(function (i) {
+      rw.appendChild(el('div', 'r' + (i.tone ? ' ' + i.tone : ''),
+        '<div class="rt"><span class="bdg"></span>' + esc(i.title) + '</div>' +
+        (i.meta ? '<div class="rm">' + esc(i.meta) + '</div>' : '')));
+    });
+    lb.appendChild(rw);
+    return lb;
+  }
+
+  if (b.type === 'note') {
+    var tone = b.tone === 'warn' ? ' warn' : (b.tone === 'bad' ? ' bad' : ' info');
+    return el('div', 'note' + tone, esc(b.text));
+  }
+
+  return null;
+}
+
+function renderResult(data) {
+  var hall = $('#hall');
+  var panel = el('div', 'panel');
+
+  // 头部
+  var head = el('div', 'p-head');
+  head.innerHTML =
+    '<div><h2>' + esc(data.title || MODE_NAME[data.mode] || '执行结果') + '</h2>' +
+    '<div class="sub">' + esc(data.subtitle || '') + '</div></div>' +
+    '<div class="acts">' +
+      '<button data-act="again">重新执行</button>' +
+      '<button data-act="close">关闭</button>' +
+    '</div>';
+  panel.appendChild(head);
+
+  var body = el('div', 'p-body');
+
+  // 数据链路（真实调用记录）
+  if (data.chain && data.chain.length) {
+    var okCount = data.chain.filter(function (c) { return c.ok; }).length;
+    var ch = el('div', 'chain');
+    ch.innerHTML = '<div class="hd"><span>真实调用链 · ' + okCount + '/' + data.chain.length + ' 步成功，由本地服务直连麦当劳 MCP</span>' +
+      '<span>总耗时 ' + (data.costMs || 0) + ' ms</span></div><div class="steps">' +
+      data.chain.map(function (c) {
+        return '<span class="chip' + (c.ok ? '' : ' fail') + '">' + (c.ok ? '✓' : '✗') + ' ' + esc(c.tool) +
+          '<span class="t">' + c.ms + 'ms</span></span>';
+      }).join('') + '</div>';
+    body.appendChild(ch);
+  }
+
+  // 错误态
+  if (data.ok === false && data.error) {
+    body.appendChild(el('div', 'note bad', '执行失败：' + esc(data.error)));
+  }
+
+  // 内容块
+  (data.blocks || []).forEach(function (b) {
+    var n = renderBlock(b);
+    if (n) body.appendChild(n);
+  });
+
+  panel.appendChild(body);
+  hall.innerHTML = '';
+  hall.appendChild(panel);
+
+  panel.querySelector('[data-act="close"]').addEventListener('click', closeOverlay);
+  panel.querySelector('[data-act="again"]').addEventListener('click', function () {
+    var mode = data.mode || currentMode;
+    closeOverlay();
+    setTimeout(function () { runMode(mode); }, 220);
+  });
+
+  // 表格里过长的列，超宽时允许横向滚动（表格已包在 .tw 里）
+  hall.scrollTop = 0;
+}
+
+/* ---------------- overlay 控制 ---------------- */
+var currentMode = null;
+var busy = false;
+var hintTimer = null;
+
+function openOverlay(hintTitle, hintSub) {
+  var ov = $('#overlay');
+  $('#hintTitle').textContent = hintTitle;
+  $('#hintSub').textContent = hintSub;
+  $('#hall').innerHTML = '';
+  ov.classList.add('open');
+  ov.classList.remove('through');
+  ov.setAttribute('aria-hidden', 'false');
+  document.body.style.overflow = 'hidden';
+}
+
+function markThrough() {
+  $('#overlay').classList.add('through');
+}
+
+function closeOverlay() {
+  var ov = $('#overlay');
+  ov.classList.remove('through');
+  clearInterval(hintTimer);
+  setTimeout(function () {
+    ov.classList.remove('open');
+    ov.setAttribute('aria-hidden', 'true');
+    $('#hall').innerHTML = '';
+    document.body.style.overflow = '';
+  }, 340);
+}
+
+document.addEventListener('keydown', function (e) {
+  if (e.key === 'Escape' && $('#overlay').classList.contains('open')) closeOverlay();
+});
+
+/* ---------------- 执行一个模式 ---------------- */
+function runMode(mode) {
+  if (busy) return;
+  busy = true;
+  currentMode = mode;
+
+  var card = document.querySelector('.card[data-mode="' + mode + '"]');
+  var cueEl = card ? card.querySelector('.cue') : null;
+  var cueBackup = cueEl ? cueEl.innerHTML : '';
+  if (card) { card.classList.add('busy'); card.disabled = true; }
+  if (cueEl) cueEl.innerHTML = '正在执行真实 MCP 调用链…';
+
+  openOverlay('推 门 进 殿', MODE_NAME[mode] + ' · 正在执行真实 MCP 调用链…');
+
+  // 链路进度提示（把声明的链路逐个点亮）
+  var steps = CHAIN_HINT[mode] || [];
+  var i = 0;
+  clearInterval(hintTimer);
+  hintTimer = setInterval(function () {
+    if (i < steps.length) {
+      $('#hintSub').textContent = '正在调用 ' + steps[i] + ' …';
+      i++;
+    }
+  }, 380);
+
+  var t0 = Date.now();
+  var minWait = 900; // 让开门动画至少走完，避免闪一下
+
+  fetch(API.run, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mode: mode })
+  })
+    .then(function (r) { return r.json(); })
+    .then(function (data) {
+      data.mode = data.mode || mode;
+      var wait = Math.max(0, minWait - (Date.now() - t0));
+      setTimeout(function () {
+        clearInterval(hintTimer);
+        renderResult(data);
+        markThrough();
+        finish();
+      }, wait);
+    })
+    .catch(function (err) {
+      clearInterval(hintTimer);
+      renderResult({
+        ok: false, mode: mode,
+        title: MODE_NAME[mode],
+        subtitle: '本地服务没有响应',
+        error: err.message + '（请确认 m-king 的本地服务正在运行）',
+        blocks: [{ type: 'note', tone: 'bad', text: '本地服务连接失败：' + err.message + '。请确认 server.js 正在运行（node server.js），然后重试。' }]
+      });
+      markThrough();
+      finish();
+    });
+
+  function finish() {
+    busy = false;
+    if (card) { card.classList.remove('busy'); card.disabled = false; }
+    if (cueEl) cueEl.innerHTML = cueBackup;
+  }
+}
+
+/* ---------------- 绑事件 + 启动 ---------------- */
+$$('.card[data-mode]').forEach(function (c) {
+  c.addEventListener('click', function () { runMode(c.getAttribute('data-mode')); });
+});
+
+$('#overlay').addEventListener('click', function (e) {
+  // 点背景（门外）也能关，但不影响面板内操作
+  if (e.target.classList.contains('ov-bg')) closeOverlay();
+});
+
+(function boot() {
+  setStatus('', '正在连接麦当劳 MCP…');
+  fetch(API.status)
+    .then(function (r) { return r.json(); })
+    .then(function (s) {
+      if (s.ok) {
+        setStatus('live', '已连接麦当劳 MCP · ' + s.toolCount + ' 个工具 · Token 来自 ' + (s.tokenSource || '本地配置'));
+        loadDashboard();
+      } else {
+        setStatus('err', '未配置麦当劳 MCP Token');
+        $('#today').innerHTML = '<div class="hd"><span>需要先配置</span></div><div class="muted">' +
+          esc(s.hint || '请按 README 配置 McDonald\'s MCP Token') + '</div>';
+        $('#tagline').textContent = '配置好 Token 后刷新本页即可执行';
+      }
+    })
+    .catch(function () {
+      setStatus('err', '本地服务未运行');
+      $('#today').innerHTML = '<div class="hd"><span>本地服务未启动</span></div><div class="muted">' +
+        '请在本目录执行 <b>node server.js</b>，然后刷新本页。</div>';
+      $('#tagline').textContent = '本地服务未运行 —— 先启动 server.js';
+    });
+})();
+</script>
+</body>
+</html>
