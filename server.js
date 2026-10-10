@@ -20,9 +20,23 @@ const path = require('path');
 const { MODES, dashboard } = require('./lib/modes');
 const mcp = require('./lib/mcp');
 
+if (parseInt(process.versions.node, 10) < 18) {
+  console.error('m-king 需要 Node.js 18+（用到内置 fetch），当前为 ' + process.version);
+  process.exit(1);
+}
+
 const ROOT = __dirname;
 const HOST = process.env.MCD_HOST || '127.0.0.1';
 const PREFERRED_PORT = Number(process.env.MCD_PORT || 8799);
+
+/* 调试裸调用的精确白名单：改动这里必须同步 README 的安全承诺 */
+const TOOL_ALLOWLIST = new Set([
+  'now-time-info', 'campaign-calendar',
+  'query-nearby-stores', 'query-meals', 'query-my-account', 'query-my-coupons', 'query-lottery-info',
+  'order-list', 'list-nutrition-foods', 'mall-points-products', 'mall-order-list',
+  'available-coupons', 'delivery-query-addresses', 'delivery-query-stores',
+  'calculate-price',
+]);
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -54,14 +68,28 @@ function sendJson(res, code, obj) {
 function readBody(req) {
   return new Promise((resolve) => {
     let data = '';
+    let settled = false;
+    const finish = (val) => { if (!settled) { settled = true; resolve(val); } };
     req.on('data', (c) => {
       data += c;
-      if (data.length > 1e6) req.destroy(); // 防超大请求体
+      if (data.length > 1e6) { req.destroy(); finish({}); } // 防超大请求体
     });
     req.on('end', () => {
-      try { resolve(data ? JSON.parse(data) : {}); } catch (e) { resolve({}); }
+      try { finish(data ? JSON.parse(data) : {}); } catch (e) { finish({}); }
     });
+    // 连接被中断/销毁时 end 不会触发，兜底 resolve，避免请求悬挂
+    req.on('error', () => finish({}));
+    req.on('close', () => finish({}));
   });
+}
+
+/** 只接受回环来源的 Host 头，防 DNS rebinding 把本服务变成攻击者页面的「同源」后端 */
+function hostAllowed(req) {
+  const hostname = String(req.headers.host || '')
+    .toLowerCase().replace(/:\d+$/, '').replace(/^\[|\]$/g, '');
+  if (hostname === '127.0.0.1' || hostname === 'localhost' || hostname === '::1') return true;
+  // 用户主动改 MCD_HOST 暴露到非回环时（自行承担风险），放行同名 Host
+  return HOST !== '127.0.0.1' && hostname === String(HOST).toLowerCase();
 }
 
 /** 静态文件，限制在项目目录内，防目录穿越 */
@@ -75,7 +103,15 @@ function serveStatic(req, res, urlPath) {
   });
 }
 
-const server = http.createServer(async (req, res) => {
+const server = http.createServer((req, res) => {
+  handle(req, res).catch((e) => {
+    try { send(res, 500, 'Internal Error: ' + e.message); } catch (e2) { /* 响应已发出 */ }
+  });
+});
+
+async function handle(req, res) {
+  if (!hostAllowed(req)) return send(res, 403, 'Forbidden');
+
   const url = new URL(req.url, 'http://' + HOST);
   const p = url.pathname;
 
@@ -126,12 +162,11 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  /* ---------- 单次裸调用（调试用，白名单） ---------- */
+  /* ---------- 单次裸调用（调试用，白名单：只放行查询/算价类，与 README「绝不调用写入类能力」的承诺一致） ---------- */
   if (p === '/api/tool' && req.method === 'POST') {
     const body = await readBody(req);
-    const ALLOW = /^(query|delivery|mall|order|campaign|available|auto|list|calculate|now|draw|party|cancel|create)/;
-    if (!body.name || !ALLOW.test(body.name)) {
-      return sendJson(res, 400, { ok: false, error: '不允许的工具名' });
+    if (!body.name || !TOOL_ALLOWLIST.has(body.name)) {
+      return sendJson(res, 400, { ok: false, error: '不允许的工具名（白名单仅含查询/算价类工具）' });
     }
     const r = await mcp.callTool(body.name, body.args || {});
     return sendJson(res, 200, { ok: r.ok, ms: r.ms, tool: r.tool, data: r.data, error: r.error });
@@ -140,7 +175,7 @@ const server = http.createServer(async (req, res) => {
   if (p.startsWith('/api/')) return sendJson(res, 404, { ok: false, error: 'no such api' });
 
   return serveStatic(req, res, p);
-});
+}
 
 /** 端口占用时顺延，直到找到可用端口 */
 function listen(port, attempts = 12) {

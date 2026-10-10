@@ -16,7 +16,9 @@
 
 打开就能看到金拱门宫门和六个技能的**真实运行结果**——无需安装、无需配置、无需 MCP Token。
 
-> 说明：线上版是**静态快照**（把一次真实调用链的结果烘焙进页面），所以它不发起网络请求，只用来展示界面与产出长什么样。**完整可执行版**请按下方「快速开始」在本地运行，点击卡片会真的一次次去打麦当劳 MCP。
+> 说明：线上版是**静态快照**（把一次真实调用链的结果烘焙进页面），所以它不发起网络请求，只用来展示界面与产出长什么样。快照在生成时做了**脱敏**：门店名称替换为「示例门店」、订单时间打码到月份，个人消费金额与积分故事保留。**完整可执行版**请按下方「快速开始」在本地运行，点击卡片会真的一次次去打麦当劳 MCP。
+>
+> `demo/index.html` 是某次构建的产物，若与最新代码不一致，以本地重新执行 `npm run demo` 的结果为准。
 
 ---
 
@@ -96,7 +98,7 @@ export MCD_MCP_TOKEN="你的Token"
 
 ```bash
 cd m-king
-node server.js
+node server.js        # 或 npm start
 ```
 
 ```
@@ -110,10 +112,17 @@ node server.js
 
 ### 第 4 步 · 打开浏览器
 
-访问 <http://127.0.0.1:8799/>，点任意一门。
+访问 <http://127.0.0.1:8799/>，点任意一门。页面顶部的门店选择器可以切换基准门店（麦价指数 / 券管家 / 热量教练会用到）。
 
-> 服务只监听 `127.0.0.1`，不对局域网或公网开放。端口被占用时会自动顺延（8799 → 8800 → …）。
-> 可用 `MCD_PORT=9000 node server.js` 指定端口，`MCD_CITY=上海` 指定默认搜索城市。
+> 服务只监听 `127.0.0.1`，不对局域网或公网开放，并校验请求的 Host 头（防 DNS rebinding）。端口被占用时会自动顺延（8799 → 8800 → …）。
+> 可用 `MCD_PORT=9000 node server.js` 指定端口，`MCD_CITY=上海` 指定默认搜索城市；`MCD_CACHE_TTL_MS=0` 可关闭门店/菜单的短缓存（默认 45 秒，命中会在调用链里标注 `(cache)`）。
+
+### 其他命令
+
+```bash
+npm test        # 单元测试 + server 安全基线测试（node:test，零依赖）
+npm run demo    # 重新生成脱敏静态演示页 demo/index.html（需先起服务）
+```
 
 ---
 
@@ -124,15 +133,17 @@ node server.js
 点「三路比价器」，返回：
 
 ```
-72.90 元 实付
-到店自取 · 比最贵那条省 ¥11.60（13.7%）
+77.50 元 实付
+到店自取 · 比最贵那条省 ¥16.00（17.1%）
 基准篮子：双层猪柳蛋麦满分×1 + 牛奶×1 + 麦咖啡热美式中杯×1 + 巧克力味厚松饼猪柳蛋堡×1
 
 履约方式      门店                    商品小计   配送费   打包费   实付     判定
-到店自取      北京·示例门店A          ¥72.90     —        —      ¥72.90   🏆 最省
-得来速车道    北京·示例门店B   ¥73.90     —        —      ¥73.90   + ¥1.00
-麦乐送        北京·示例门店C   ¥76.90    ¥6.00    ¥1.60    ¥84.50   + ¥11.60
+到店自取      北京·示例门店A          ¥77.50     —        —      ¥77.50   🏆 最省
+得来速车道    北京·示例门店C          —          —        —      —        不可用：门店暂停营业
+麦乐送        北京·示例门店B          ¥84.50    ¥6.00    ¥3.00    ¥93.50   + ¥16.00
 ```
+
+> 示例输出中的门店名已脱敏（演示页同样处理，见 `lib/sanitize.js`）。
 
 页面底部会说明口径：**同款商品在到店菜单和外送菜单上的标价本身就可能不同**，这正是差价的主要来源——通常没人注意到这点。
 
@@ -176,19 +187,23 @@ node server.js
 m-king/
 ├── server.js                 # 本地服务：静态托管 + MCP 代理 + 模式编排（零依赖）
 ├── index.html                # 单文件前端：金拱门宫门 + 六门 + 结果渲染器
+├── package.json              # engines / scripts（start / demo / test）
 ├── lib/
 │   ├── mcp.js                # MCP 客户端：JSON-RPC over HTTP，Token 三级回退
-│   └── modes.js              # 六大模式的真实调用链与计算逻辑
+│   ├── modes.js              # 六大模式的真实调用链与计算逻辑（含短 TTL 缓存）
+│   └── sanitize.js           # 演示快照脱敏：门店名称替换、订单时间打码
 ├── references/
 │   └── modes.md              # 每个模式的取数与算法细节（按需查阅）
 ├── scripts/
-│   └── build-demo.js         # 生成静态快照 Demo（demo/index.html）
+│   └── build-demo.js         # 生成静态快照 Demo（demo/index.html，自动脱敏）
+├── test/                     # node:test 测试：纯函数 + server 安全基线
 ├── demo/
-│   └── index.html            # 在线演示页：自包含、零网络请求
+│   └── index.html            # 在线演示页：自包含、零网络请求、已脱敏
 ├── SKILL.md                  # WorkBuddy Skill 入口定义
 ├── README.md                 # 本文件
 ├── MCP_INTEGRATION.md        # MCP 接入说明：Server / Tool / 调用流程 / 业务价值
 ├── CONTEST_DECLARATION.md    # 参赛声明（官方模板，未改动）
+├── LICENSE                   # MIT
 ├── mcp-config.example.json   # 脱敏配置示例（仅环境变量占位符）
 └── workbuddy.md              # WorkBuddy 对话上下文
 ```
@@ -228,7 +243,10 @@ A：MCP 是服务端能力，浏览器 JS 无法直接调用。要做"点了就�
 A：不会。Token 只在本地 [`lib/mcp.js`](lib/mcp.js) 进程内使用，**不写入任何日志、不包含在任何 API 返回体里、不出现在页面源码中**。仓库里只有 `mcp-config.example.json` 这个纯占位符示例。
 
 **Q：会不会误下单？**
-A：不会。m-king 只调用**查询类**和**算价类** Tool（`query-*` / `calculate-price` / `list-*` / `mall-points-products` 等），**不调用任何写入类能力**（`create-order` / `auto-bind-coupons` / `draw-lottery` / `party-order-create` 一律不碰）。涉及"领取/下单"的动作只会在文字结论里**建议**你去做。
+A：不会。m-king 只调用**查询类**和**算价类** Tool（`query-*` / `calculate-price` / `list-*` / `mall-points-products` 等），**不调用任何写入类能力**（`create-order` / `auto-bind-coupons` / `draw-lottery` / `party-order-create` 一律不碰）。调试端点 `/api/tool` 使用**精确工具名白名单**（仅含上述只读工具），前缀撞名的写入类工具同样会被拒绝。涉及"领取/下单"的动作只会在文字结论里**建议**你去做。
+
+**Q：演示快照里是谁的数据？**
+A：是开发者本人的一次真实调用结果，但生成时经过 `lib/sanitize.js` 脱敏：门店名称替换为「北京·示例门店A/B/C…」（常去门店≈常驻位置，是最强的定位信号），订单时间打码到月份（保留消费故事的形状，抹掉行为时间线）。金额与积分保留，因为它们是演示的故事线且不构成定位。
 
 **Q：能改成我自己的门店/城市吗？**
 A：可以。`MCD_CITY=上海 node server.js`，或写进 `mcp.config.json`。门店优先用你的收藏门店。
@@ -241,3 +259,5 @@ A：可以。`MCD_CITY=上海 node server.js`，或写进 `mcp.config.json`。�
 项目输出仅供参考，不构成医疗、营养或其他专业建议；餐品信息、价格及供应状态以麦当劳官方渠道的实时结果为准。
 
 MCP 服务由麦当劳中国提供：<https://open.mcd.cn/mcp>
+
+代码以 [MIT 许可](LICENSE) 开源，可自由参考与复用。

@@ -398,6 +398,9 @@ var API = {
   run:       '/api/run'
 };
 
+/* 用户在看板上选中的基准门店 {code, name}；为 null 时由服务端自动解析 */
+var selectedStore = null;
+
 /* 每个模式声明自己会走的链路，仅用于加载时的进度提示 */
 var CHAIN_HINT = {
   'mci-index':           ['now-time-info', 'query-nearby-stores', 'query-meals'],
@@ -405,7 +408,7 @@ var CHAIN_HINT = {
   'points-advisor':      ['query-my-account', 'mall-points-products', 'query-lottery-info'],
   'fulfillment-compare': ['query-nearby-stores', 'delivery-query-stores', 'query-meals', 'calculate-price'],
   'coupon-lifecycle':    ['available-coupons', 'query-my-coupons', 'query-meals'],
-  'calorie-coach':       ['list-nutrition-foods', 'query-nearby-stores', 'query-meals']
+  'calorie-coach':       ['now-time-info', 'list-nutrition-foods', 'query-nearby-stores', 'query-meals']
 };
 
 var MODE_NAME = {
@@ -466,7 +469,32 @@ function loadDashboard() {
         box.innerHTML = '<div class="hd"><span>今日活动速览</span><span></span></div><div class="muted">今天没有读到进行中的活动条目。</div>';
       }
 
-      if (d.store) $('#tagline').textContent = '当前基准门店：' + d.store.name + '（收藏门店 ' + d.store.count + ' 家）';
+      if (d.stores && d.stores.length) {
+        // 门店选择器：麦价指数 / 券管家 / 热量教练按所选门店取数
+        var tag = $('#tagline');
+        tag.textContent = '基准门店：';
+        var sel = document.createElement('select');
+        sel.id = 'storePick';
+        sel.style.cssText = 'font:inherit;font-size:12.5px;padding:3px 8px;margin:0 4px;border:1px solid #EADFD4;border-radius:8px;background:#FFF;color:var(--ink);max-width:230px;vertical-align:middle;';
+        d.stores.forEach(function (s) {
+          var o = document.createElement('option');
+          o.value = s.code;
+          o.textContent = String(s.name || '').replace(/^麦当劳/, '');
+          sel.appendChild(o);
+        });
+        sel.addEventListener('change', function () {
+          var hit = d.stores.filter(function (x) { return x.code === sel.value; })[0];
+          selectedStore = hit ? { code: hit.code, name: hit.name } : null;
+        });
+        selectedStore = { code: d.stores[0].code, name: d.stores[0].name };
+        tag.appendChild(sel);
+        var tip = document.createElement('span');
+        tip.style.cssText = 'font-size:11px;color:#A79B92;';
+        tip.textContent = '（麦价指数 / 券管家 / 热量教练使用所选门店）';
+        tag.appendChild(tip);
+      } else if (d.store) {
+        $('#tagline').textContent = '当前基准门店：' + d.store.name + '（收藏门店 ' + d.store.count + ' 家）';
+      }
     })
     .catch(function (e) {
       $('#today').innerHTML = '<div class="hd"><span>今日活动速览</span></div><div class="muted">读取失败：' + esc(e.message) + '</div>';
@@ -651,6 +679,8 @@ document.addEventListener('keydown', function (e) {
 });
 
 /* ---------------- 执行一个模式 ---------------- */
+var RUN_TIMEOUT_MS = 120000; // 兜底超时：慢链路（如串行多步算价）不让面板无限等
+
 function runMode(mode) {
   if (busy) return;
   busy = true;
@@ -664,24 +694,40 @@ function runMode(mode) {
 
   openOverlay('推 门 进 殿', MODE_NAME[mode] + ' · 正在执行真实 MCP 调用链…');
 
-  // 链路进度提示（把声明的链路逐个点亮）
+  // 链路进度提示（把声明的链路逐个点亮），超过声明步数后显示已等待时长
   var steps = CHAIN_HINT[mode] || [];
   var i = 0;
+  var t0 = Date.now();
   clearInterval(hintTimer);
   hintTimer = setInterval(function () {
+    var secs = Math.round((Date.now() - t0) / 1000);
     if (i < steps.length) {
-      $('#hintSub').textContent = '正在调用 ' + steps[i] + ' …';
+      $('#hintSub').textContent = '正在调用 ' + steps[i] + ' …（已 ' + secs + ' 秒）';
       i++;
+    } else {
+      $('#hintSub').textContent = '仍在等待麦当劳 MCP 响应…（已 ' + secs + ' 秒）';
     }
   }, 380);
 
-  var t0 = Date.now();
   var minWait = 900; // 让开门动画至少走完，避免闪一下
+
+  // 取消按钮 + 兜底超时，避免慢链路把面板卡死
+  var ctrl = new AbortController();
+  var cancelBtn = el('button');
+  cancelBtn.textContent = '取消执行';
+  cancelBtn.style.cssText = 'margin-top:12px;padding:5px 14px;font-size:12px;border:1px solid #E4B8B3;border-radius:999px;background:rgba(255,255,255,.85);color:#8E1A10;';
+  cancelBtn.addEventListener('click', function () { ctrl.abort(); });
+  $('#doorHint').appendChild(cancelBtn);
+  var timeoutId = setTimeout(function () { ctrl.abort(); }, RUN_TIMEOUT_MS);
 
   fetch(API.run, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ mode: mode })
+    body: JSON.stringify({
+      mode: mode,
+      options: selectedStore ? { storeCode: selectedStore.code, storeName: selectedStore.name } : {}
+    }),
+    signal: ctrl.signal
   })
     .then(function (r) { return r.json(); })
     .then(function (data) {
@@ -696,12 +742,17 @@ function runMode(mode) {
     })
     .catch(function (err) {
       clearInterval(hintTimer);
+      var aborted = err && err.name === 'AbortError';
       renderResult({
         ok: false, mode: mode,
         title: MODE_NAME[mode],
-        subtitle: '本地服务没有响应',
-        error: err.message + '（请确认 m-king 的本地服务正在运行）',
-        blocks: [{ type: 'note', tone: 'bad', text: '本地服务连接失败：' + err.message + '。请确认 server.js 正在运行（node server.js），然后重试。' }]
+        subtitle: aborted ? '执行已取消' : '本地服务没有响应',
+        error: aborted
+          ? '等待超时或已手动取消（兜底超时 ' + (RUN_TIMEOUT_MS / 1000) + ' 秒）。链路较慢时可重试。'
+          : err.message + '（请确认 m-king 的本地服务正在运行）',
+        blocks: [{ type: 'note', tone: 'bad', text: aborted
+          ? '本次执行被取消。麦当劳 MCP 偶发慢响应时，稍等片刻再点「重新执行」即可。'
+          : '本地服务连接失败：' + err.message + '。请确认 server.js 正在运行（node server.js），然后重试。' }]
       });
       markThrough();
       finish();
@@ -709,6 +760,8 @@ function runMode(mode) {
 
   function finish() {
     busy = false;
+    clearTimeout(timeoutId);
+    if (cancelBtn.parentNode) cancelBtn.parentNode.removeChild(cancelBtn);
     if (card) { card.classList.remove('busy'); card.disabled = false; }
     if (cueEl) cueEl.innerHTML = cueBackup;
   }

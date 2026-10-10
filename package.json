@@ -1,0 +1,19 @@
+{
+  "name": "m-king",
+  "version": "1.1.0",
+  "description": "麦门总管 · 建立在麦当劳中国 MCP 之上的可视化技能入口（零第三方依赖）",
+  "private": true,
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "demo": "node scripts/build-demo.js",
+    "test": "node --test"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/xianglifei/m-king.git"
+  }
+}
