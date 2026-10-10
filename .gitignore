@@ -1,0 +1,13 @@
+# 绝不提交任何含真实凭证的文件
+mcp.config.json
+.env
+.env.local
+
+# 依赖与系统文件
+node_modules/
+.DS_Store
+*.log
+
+# 编辑器
+.vscode/
+.idea/
