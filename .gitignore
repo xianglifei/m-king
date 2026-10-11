@@ -11,3 +11,8 @@ node_modules/
 # 编辑器
 .vscode/
 .idea/
+
+# 麦门制霸图真实数据（含位置信号，严禁入库）
+kingdom/data/
+__pycache__/
+*.pyc

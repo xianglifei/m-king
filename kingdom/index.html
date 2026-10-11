@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>麦门制霸图 · 全城制霸，吃遍麦门</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>麦门制霸图</h1>
+    <span class="sub">全城制霸 · 吃遍麦门</span>
+    <span id="modeBadge" class="badge demo">演示数据</span>
+    <span id="cityName" class="sub"></span>
+    <span class="spacer"></span>
+    <button id="sbToggle" onclick="document.getElementById('sidebar').classList.toggle('open')">☰ 王国</button>
+    <button id="btnConquer" class="primary">⚔ 发起征伐</button>
+    <button id="btnImport">导入数据</button>
+    <button id="btnReset">重置演示</button>
+    <button id="btnHelp">?</button>
+    <input type="file" id="fileInput" accept=".json" style="display:none">
+  </header>
+
+  <div id="main">
+    <div id="mapWrap">
+      <canvas id="map"></canvas>
+      <div id="tooltip"></div>
+    </div>
+
+    <aside id="sidebar">
+      <h2>王国总览</h2>
+      <div id="titleRow">
+        <span id="playerTitle">麦门路人</span>
+        <span id="nextTitle"></span>
+      </div>
+      <div class="bar red"><i id="titleBar"></i></div>
+      <div class="stat-grid" style="margin-top:10px">
+        <div class="stat wide">
+          <div class="k">版图占比（按领地面积）</div>
+          <div class="v"><span id="stArea">0</span><small> %</small></div>
+          <div class="bar" style="margin-top:6px"><i id="areaBar"></i></div>
+        </div>
+        <div class="stat">
+          <div class="k">城邦征服</div>
+          <div class="v"><span id="stStores">0</span><small> / <span id="stStoresAll">0</span></small></div>
+        </div>
+        <div class="stat">
+          <div class="k">战功</div>
+          <div class="v"><span id="stScore">0</span></div>
+        </div>
+        <div class="stat">
+          <div class="k">开疆郡数</div>
+          <div class="v"><span id="stDistricts">0</span><small> / <span id="stDistrictsAll">0</span></small></div>
+        </div>
+        <div class="stat">
+          <div class="k">王都攻克</div>
+          <div class="v"><span id="stCapitals">0</span></div>
+        </div>
+      </div>
+
+      <h2>区县战况</h2>
+      <div id="districtRows"></div>
+
+      <h2>征服编年史</h2>
+      <ul id="chronicle"></ul>
+
+      <h2>图例</h2>
+      <div id="legend"></div>
+
+      <h2>关于</h2>
+      <div style="font-size:11.5px;color:#8a7146;line-height:1.7">
+        麦门制霸图 m-king v2 · 玩法与真实数据接入见仓库 kingdom/README.md。<br>
+        演示数据为虚构门店示意；真实门店与订单请通过 MCP 桥接脚本获取。
+      </div>
+    </aside>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<div id="help">
+  <div class="panel">
+    <h3>麦门制霸图 · 玩法</h3>
+    <p><b>这是一张把真实门店重绘成游戏地图的征服板。</b>全城每一家麦当劳都是一座城邦：旗舰店是王都，商场店是城镇，得来速与社区店是边哨。每家城邦按 Voronoi 领地划分疆域——你吃下一家店，就点亮它的整片领地。</p>
+    <p><b>版图占比</b>按领地面积计算，不是门店数：吃在门店密集的城区，推进慢；远征密云延庆，一步开疆一大片。</p>
+    <p><b>战功</b>= 城邦等级（王都 500 / 城镇 200 / 边哨 100）× 远郊 1.5 倍，首次攻入一个郡另有开疆奖 150。</p>
+    <p><b>称号</b>随版图晋升：麦门路人 → 见习麦民 → 麦田巡逻官 → 金拱门骑士 → 堡垒男爵 → 边疆侯爵 → 巨无霸公爵 → 麦门亲王 → 制霸者·麦门之主。</p>
+    <p><b>操作</b>：滚轮缩放、拖拽平移、双击复位；悬停查看城邦情报；演示模式下点击未征服城邦即可攻占，或点右上「发起征伐」。</p>
+    <p><b>接真实数据</b>：在仓库目录运行 <code>python3 kingdom/tools/fetch_mcd_data.py</code>（需 MCD_MCP_TOKEN），生成 data/stores.json 与 data/visits.json 后刷新页面即变为你自己的王国。历史订单接口只返回最近约 10 单，visits.json 是累积档案，请妥善留存。</p>
+    <p style="color:#8a6a2e">隐私提醒：真实门店名≈位置信息。公开分享或部署前请用 fetch 脚本的 --sanitize 生成脱敏版。</p>
+    <div class="close"><button onclick="document.getElementById('help').classList.remove('show')">开始制霸</button></div>
+  </div>
+</div>
+
+<script src="data-demo.js?v=20261011b"></script>
+<script src="app.js"></script>
+</body>
+</html>
