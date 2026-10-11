@@ -1,26 +1,14 @@
 /* 麦门制霸图 · m-king v2（Q版）
- * 把全城麦当劳门店画成一张Q版游戏地图：
- * 每家店是一座小城，按 Voronoi 领地划分地盘；
- * 用户真实打卡吃过哪家，哪片领地就被点亮——没有随机自动点亮。
- * 零依赖，可 file:// 直接打开；真实数据见 tools/fetch_mcd_data.py。
+ * 渲染与交互层：纯逻辑在 core.js（可单测），本文件负责 canvas 渲染、
+ * 交互（拖拽/缩放/打卡）、持久化与产品功能（目标卡/徽章墙/分享卡）。
+ * 点亮只由真实用餐记录驱动（打卡/订单导入），没有随机自动点亮。
  */
 (() => {
 'use strict';
-
-/* ================= 小工具 ================= */
-function mulberry32(seed) {
-  let a = seed >>> 0;
-  return function () {
-    a |= 0; a = (a + 0x6D2B79F5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-const ease = t => 1 - Math.pow(1 - t, 3);
-function hashStr(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
+const C = window.MCK_CORE;
+const { clamp, ease, mulberry32, hashStr } = C;
 const FONT = '"Yuanti SC","YouYuan","PingFang SC","Microsoft YaHei",sans-serif';
+const CONFETTI_COLORS = ['#da291c', '#ffc72c', '#ffffff', '#58b368', '#ff8a3c'];
 
 /* ================= 全局状态 ================= */
 const canvas = document.getElementById('map');
@@ -34,27 +22,25 @@ const S = {
   cells: [],
   roads: [],
   visits: new Map(),
-  anims: [],            // 领土渐染动画
-  particles: [],        // 彩带
+  anims: [],
+  particles: [],
   hover: null,
   tooltipPinned: false,
-  lastCheckIn: null,    // 撤销用
+  lastCheckIn: null,
   view: { k: 1, tx: 0, ty: 0 },
   W: 1000, H: 600,
   kmPerUnit: 1,
   score: 0, scoreShown: 0,
-  dragging: false, dragMoved: false, dragStart: null, viewStart: null,
+  dragging: false, dragMoved: false,
 };
 
-const TIER_NAME = { 3: '王都', 2: '城镇', 1: '甜品站' };
-const TIER_SCORE = { 3: 500, 2: 200, 1: 100 };
-const FRONTIER_BONUS = 150;
-const REMOTE_MULT = 1.5;
-const TITLES = [
-  [0, '麦门路人'], [1, '见习麦民'], [5, '麦田巡逻官'], [10, '金拱门骑士'],
-  [20, '堡垒男爵'], [30, '边疆侯爵'], [45, '巨无霸公爵'], [60, '麦门亲王'], [80, '制霸者 · 麦门之主'],
-];
-const CONFETTI_COLORS = ['#da291c', '#ffc72c', '#ffffff', '#58b368', '#ff8a3c'];
+/* ================= 持久化（手动打卡 + 首访标记） ================= */
+const LS_KEY = 'mck-checkins-v1';
+let P = { demo: [], real: [], seenHelp: false };
+try { P = Object.assign(P, JSON.parse(localStorage.getItem(LS_KEY) || '{}')); } catch (e) { /* 隐私模式等 */ }
+function persist() {
+  try { localStorage.setItem(LS_KEY, JSON.stringify({ demo: P.demo, real: P.real, seenHelp: P.seenHelp })); } catch (e) { /* 忽略 */ }
+}
 
 /* ================= 数据加载 ================= */
 async function tryFetchJSON(url) {
@@ -84,120 +70,35 @@ async function loadData() {
   }
   S.stores = stores;
   S.visits = new Map((visits || []).map(v => [v.storeId, v.date || '']));
+  // 合并本机手动打卡（订单接口只有最近 ~10 单，手动打卡是长期档案）
+  for (const rec of (P[S.mode] || [])) {
+    if (S.stores.some(s => s.id === rec.storeId) && !S.visits.has(rec.storeId)) {
+      S.visits.set(rec.storeId, rec.date || '');
+    }
+  }
+  // 撤销入口跨刷新可用：指向档案里最近的一条手动打卡
+  const manual = P[S.mode] || [];
+  if (manual.length) {
+    S.lastCheckIn = { storeId: manual[manual.length - 1].storeId };
+  }
   build();
 }
 
-/* ================= 投影与几何 ================= */
+/* ================= 投影与构建 ================= */
 let landRect = null;
 
 function build() {
-  const lats = S.stores.map(s => s.lat), lngs = S.stores.map(s => s.lng);
-  const lat0 = Math.min(...lats), lat1 = Math.max(...lats);
-  const lng0 = Math.min(...lngs), lng1 = Math.max(...lngs);
-  const midLat = (lat0 + lat1) / 2;
-  const kx = Math.cos(midLat * Math.PI / 180);
-  const spanX = (lng1 - lng0) * kx, spanY = (lat1 - lat0);
-  const W = 1000;
-  const H = Math.max(420, Math.min(1400, W * spanY / Math.max(spanX, 1e-9)));
-  const mx = (lng0 + lng1) / 2, my = (lat0 + lat1) / 2;
-  const pad = 1.06;
-  for (const s of S.stores) {
-    s.x = W / 2 + (s.lng - mx) * kx / spanX * W / pad;
-    s.y = H / 2 - (s.lat - my) / spanY * H / pad;
-  }
-  S.W = W; S.H = H;
+  const { W, H, kmPerUnit } = C.projectStores(S.stores);
+  S.W = W; S.H = H; S.kmPerUnit = kmPerUnit;
   const inset = 7;
   landRect = { x: inset, y: inset, w: W - inset * 2, h: H - inset * 2, r: 30 };
-  S.kmPerUnit = ((spanX * 111.32 + spanY * 111.32) / 2) / ((W / pad + H / pad) / 2);
-
-  S.cells = voronoi(S.stores, { x0: 0, y0: 0, x1: W, y1: H });
-  S.roads = buildRoads(S.stores);
+  S.cells = C.voronoi(S.stores, { x0: 0, y0: 0, x1: W, y1: H });
+  S.roads = C.buildRoads(S.stores);
   document.getElementById('cityName').textContent = '· ' + S.city;
   fitView();
   ensureLoop();
   render();
   renderSidebar();
-}
-
-function voronoi(sites, bbox) {
-  const poly0 = [[bbox.x0, bbox.y0], [bbox.x1, bbox.y0], [bbox.x1, bbox.y1], [bbox.x0, bbox.y1]];
-  const cells = [];
-  for (let i = 0; i < sites.length; i++) {
-    let poly = poly0.map(p => p.slice());
-    const p = sites[i];
-    for (let j = 0; j < sites.length && poly.length >= 3; j++) {
-      if (i === j) continue;
-      poly = clipBisector(poly, p, sites[j]);
-    }
-    cells.push({ poly, site: p, area: Math.abs(polyArea(poly)) });
-  }
-  return cells;
-}
-
-/* 保留距 p 更近的一半平面：2(q-p)·x <= |q|²-|p|² */
-function clipBisector(poly, p, q) {
-  const dx = q.x - p.x, dy = q.y - p.y;
-  const c = (q.x * q.x + q.y * q.y - p.x * p.x - p.y * p.y) / 2;
-  const out = [];
-  for (let i = 0; i < poly.length; i++) {
-    const a = poly[i], b = poly[(i + 1) % poly.length];
-    const fa = dx * a[0] + dy * a[1] - c;
-    const fb = dx * b[0] + dy * b[1] - c;
-    if (fa <= 1e-9) out.push(a);
-    if ((fa < -1e-9 && fb > 1e-9) || (fa > 1e-9 && fb < -1e-9)) {
-      const t = fa / (fa - fb);
-      out.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]);
-    }
-  }
-  return out;
-}
-
-function polyArea(poly) {
-  let a = 0;
-  for (let i = 0; i < poly.length; i++) {
-    const p = poly[i], q = poly[(i + 1) % poly.length];
-    a += p[0] * q[1] - q[0] * p[1];
-  }
-  return a / 2;
-}
-function pointInPoly(pt, poly) {
-  let inside = false;
-  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-    const xi = poly[i][0], yi = poly[i][1], xj = poly[j][0], yj = poly[j][1];
-    if (((yi > pt[1]) !== (yj > pt[1])) && (pt[0] < (xj - xi) * (pt[1] - yi) / (yj - yi) + xi)) inside = !inside;
-  }
-  return inside;
-}
-
-/* 道路：MST + 每点连最近邻 */
-function buildRoads(sites) {
-  const n = sites.length;
-  const edges = [];
-  const inTree = new Array(n).fill(false);
-  const best = new Array(n).fill(Infinity);
-  const bestFrom = new Array(n).fill(-1);
-  best[0] = 0;
-  for (let it = 0; it < n; it++) {
-    let u = -1;
-    for (let i = 0; i < n; i++) if (!inTree[i] && (u === -1 || best[i] < best[u])) u = i;
-    inTree[u] = true;
-    if (bestFrom[u] >= 0) edges.push([bestFrom[u], u]);
-    for (let v = 0; v < n; v++) {
-      if (inTree[v]) continue;
-      const d = (sites[u].x - sites[v].x) ** 2 + (sites[u].y - sites[v].y) ** 2;
-      if (d < best[v]) { best[v] = d; bestFrom[v] = u; }
-    }
-  }
-  const seen = new Set(edges.map(([a, b]) => a < b ? a + '-' + b : b + '-' + a));
-  for (let i = 0; i < n; i++) {
-    const ds = sites.map((s, j) => [j, (s.x - sites[i].x) ** 2 + (s.y - sites[i].y) ** 2])
-      .filter(([j]) => j !== i).sort((a, b) => a[1] - b[1]).slice(0, 2);
-    for (const [j] of ds) {
-      const key = i < j ? i + '-' + j : j + '-' + i;
-      if (!seen.has(key)) { seen.add(key); edges.push([i, j]); }
-    }
-  }
-  return edges;
 }
 
 /* ================= 天空背景（缓存） ================= */
@@ -212,11 +113,8 @@ function makeSky(w, h) {
   grad.addColorStop(1, '#e8f8ff');
   g.fillStyle = grad;
   g.fillRect(0, 0, w, h);
-  // 远处云带
   const rnd = mulberry32(2026);
-  for (let i = 0; i < 9; i++) {
-    drawCloud(g, rnd() * w, h * (0.04 + rnd() * 0.3), 26 + rnd() * 40, 0.8);
-  }
+  for (let i = 0; i < 9; i++) drawCloud(g, rnd() * w, h * (0.04 + rnd() * 0.3), 26 + rnd() * 40, 0.8);
   return c;
 }
 function drawCloud(g, x, y, r, alpha) {
@@ -255,8 +153,7 @@ function fitView() {
   S.view.ty = (S.cssH - S.H * k) / 2;
 }
 const worldToScreen = (x, y) => [x * S.view.k + S.view.tx, y * S.view.k + S.view.ty];
-const screenToWorld = (sx, sy) => [(sx - S.view.tx) / S.view.k, (sy - S.view.ty) / S.view.k];
-const isConquered = s => S.visits.has(s.id);
+const isLit = s => C.isLit(S.visits, s.id);
 
 /* ================= 渲染 ================= */
 function rrPath(g, r) {
@@ -276,7 +173,6 @@ function render() {
   ctx.setTransform(S.dpr, 0, 0, S.dpr, 0, 0);
   ctx.drawImage(bgCanvas, 0, 0, S.cssW, S.cssH);
 
-  /* --- 王国岛（世界坐标） --- */
   ctx.translate(S.view.tx, S.view.ty);
   ctx.scale(k, k);
 
@@ -296,7 +192,7 @@ function render() {
     ctx.fill();
   }
 
-  /* --- 领地 --- */
+  // 领地
   for (const cell of S.cells) {
     const s = cell.site;
     const poly = cell.poly;
@@ -304,7 +200,7 @@ function render() {
     ctx.moveTo(poly[0][0], poly[0][1]);
     for (let i = 1; i < poly.length; i++) ctx.lineTo(poly[i][0], poly[i][1]);
     ctx.closePath();
-    if (isConquered(s)) {
+    if (isLit(s)) {
       const grad = ctx.createLinearGradient(0, s.y - 50, 0, s.y + 50);
       grad.addColorStop(0, '#ffd94e');
       grad.addColorStop(1, '#ffc32a');
@@ -318,7 +214,7 @@ function render() {
     }
   }
 
-  /* --- 白色贴纸描边 --- */
+  // 白色贴纸描边
   ctx.strokeStyle = 'rgba(255,255,255,0.95)';
   ctx.lineWidth = 3;
   ctx.lineJoin = 'round';
@@ -331,19 +227,15 @@ function render() {
     ctx.stroke();
   }
 
-  /* --- 迷雾云朵（未征服领地） --- */
+  // 迷雾云朵
   for (const cell of S.cells) {
-    if (isConquered(cell.site)) continue;
-    drawFogClouds(cell);
+    if (!isLit(cell.site)) drawFogCloud(cell);
   }
 
-  /* --- 河流 --- */
   drawRiver();
-
-  /* --- 树与山丘 --- */
   drawScenery();
 
-  /* --- 道路 --- */
+  // 道路
   ctx.setLineDash([9, 7]);
   ctx.strokeStyle = 'rgba(255,255,255,0.85)';
   ctx.lineWidth = 2.4;
@@ -355,7 +247,7 @@ function render() {
   ctx.stroke();
   ctx.setLineDash([]);
 
-  /* --- 征服动画的领土渐染 + 光环 --- */
+  // 打卡渐染动画 + 光环
   const now = performance.now();
   for (const a of S.anims) {
     const t = clamp((now - a.t0) / 900, 0, 1);
@@ -378,10 +270,10 @@ function render() {
     ctx.lineWidth = 4 * (1 - e) + 0.6;
     ctx.stroke();
   }
-  ctx.restore(); // 解除 land clip
+  ctx.restore(); // land clip
+  ctx.restore(); // world
 
-  /* --- 城邦、标签、彩带（屏幕空间，尺寸恒定） --- */
-  ctx.restore(); // 解除世界变换
+  // 屏幕空间层
   ctx.save();
   ctx.setTransform(S.dpr, 0, 0, S.dpr, 0, 0);
   for (const s of S.stores) {
@@ -402,11 +294,9 @@ function render() {
   drawSun();
   drawScaleBar();
   ctx.restore();
-
-  if (S.anims.length || S.particles.length) requestAnimationFrame(loopTick);
 }
 
-function drawFogClouds(cell) {
+function drawFogCloud(cell) {
   const rnd = mulberry32(hashStr(cell.site.id + '#c'));
   const xs = cell.poly.map(p => p[0]), ys = cell.poly.map(p => p[1]);
   const cx = (Math.min(...xs) + Math.max(...xs)) / 2, cy = (Math.min(...ys) + Math.max(...ys)) / 2;
@@ -453,10 +343,9 @@ function drawRiver() {
 function drawScenery() {
   for (const cell of S.cells) {
     const s = cell.site;
-    if (isConquered(s)) continue;
+    if (isLit(s)) continue;
     const rnd = mulberry32(hashStr(s.id + '#sc'));
     if (s.remote && rnd() > 0.3) {
-      // 软萌山丘
       ctx.fillStyle = '#a5d88a';
       ctx.strokeStyle = 'rgba(90,150,70,0.5)';
       ctx.lineWidth = 1;
@@ -471,7 +360,6 @@ function drawScenery() {
       }
     }
     if (rnd() > 0.55) {
-      // 棒棒糖树
       const n = 2 + Math.floor(rnd() * 3);
       for (let m = 0; m < n; m++) {
         const ox = s.x + (rnd() - 0.5) * 64, oy = s.y + (rnd() - 0.5) * 54;
@@ -486,30 +374,26 @@ function drawScenery() {
   }
 }
 
-/* ---------- Q版城邦图标（地图与图例共用） ---------- */
+/* ---------- Q版城邦图标（地图/图例/打卡列表共用） ---------- */
 function drawIconOn(g, tier, conquered) {
   const line = '#7a4a1e';
   g.lineJoin = 'round';
   g.lineWidth = 1.6;
   g.strokeStyle = line;
   if (tier === 3) {
-    // 王都：白墙红顶双塔城堡 + M 旗
     g.fillStyle = conquered ? '#fffdf5' : '#e8e4da';
     g.beginPath(); g.roundRect(-10, -3, 20, 11, 2); g.fill(); g.stroke();
     g.beginPath(); g.roundRect(-12.5, -9, 6.5, 17, 2); g.fill(); g.stroke();
     g.beginPath(); g.roundRect(6, -9, 6.5, 17, 2); g.fill(); g.stroke();
     g.beginPath(); g.roundRect(-3.5, -7, 7, 15, 2); g.fill(); g.stroke();
-    const roof = conquered ? '#e84a3f' : '#b9b2a6';
-    g.fillStyle = roof;
+    g.fillStyle = conquered ? '#e84a3f' : '#b9b2a6';
     g.beginPath(); g.moveTo(-13.5, -9); g.lineTo(-9.25, -14.5); g.lineTo(-5, -9); g.closePath(); g.fill(); g.stroke();
     g.beginPath(); g.moveTo(5, -9); g.lineTo(9.25, -14.5); g.lineTo(13.5, -9); g.closePath(); g.fill(); g.stroke();
     g.beginPath(); g.moveTo(-4.5, -7); g.lineTo(0, -12.5); g.lineTo(4.5, -7); g.closePath(); g.fill(); g.stroke();
-    // 门
     g.fillStyle = '#9a6a3a';
     g.beginPath();
     g.moveTo(-2.4, 8); g.lineTo(-2.4, 4.5); g.arc(0, 4.5, 2.4, Math.PI, 0); g.lineTo(2.4, 8);
     g.closePath(); g.fill();
-    // 旗
     g.beginPath(); g.moveTo(0, -12.5); g.lineTo(0, -19); g.stroke();
     g.fillStyle = conquered ? '#da291c' : '#c9c2b4';
     g.beginPath();
@@ -522,7 +406,6 @@ function drawIconOn(g, tier, conquered) {
       g.fillText('M', 4, -15.4);
     }
   } else if (tier === 2) {
-    // 城镇：红顶小屋
     g.fillStyle = conquered ? '#fffdf5' : '#e8e4da';
     g.beginPath(); g.roundRect(-7.5, -2, 15, 9, 2); g.fill(); g.stroke();
     g.fillStyle = conquered ? '#e84a3f' : '#b9b2a6';
@@ -539,10 +422,8 @@ function drawIconOn(g, tier, conquered) {
     g.fillStyle = conquered ? '#da291c' : '#c9c2b4';
     g.beginPath(); g.moveTo(0, -14); g.lineTo(6, -12.4); g.lineTo(0, -10.8); g.closePath(); g.fill();
   } else {
-    // 甜品站：黄色遮阳伞小摊
     g.fillStyle = '#fffdf5';
     g.beginPath(); g.roundRect(-6, 1, 12, 6, 2); g.fill(); g.stroke();
-    g.strokeStyle = line;
     g.beginPath(); g.moveTo(0, 1); g.lineTo(0, -8); g.stroke();
     g.fillStyle = conquered ? '#ffc72c' : '#c9c2b4';
     g.beginPath();
@@ -561,11 +442,10 @@ function drawIconOn(g, tier, conquered) {
 }
 
 function drawSettlement(s, sx, sy) {
-  const conquered = isConquered(s);
+  const conquered = isLit(s);
   const k = S.view.k;
   ctx.save();
   ctx.translate(sx, sy);
-  // 低倍缩放时：未点亮的小甜品站缩为圆点，避免密集区图标堆叠
   if (s.tier === 1 && !conquered && k < 1.35) {
     ctx.fillStyle = 'rgba(255,255,255,0.95)';
     ctx.beginPath(); ctx.arc(0, 0, 4.6, 0, Math.PI * 2); ctx.fill();
@@ -579,6 +459,7 @@ function drawSettlement(s, sx, sy) {
   ctx.ellipse(0, 10, 12, 3.4, 0, 0, Math.PI * 2);
   ctx.fill();
   drawIconOn(ctx, s.tier, conquered);
+
   const showLabel =
     s.tier === 3 ||
     (conquered && s.tier === 2 && k >= 1.18) ||
@@ -589,7 +470,6 @@ function drawSettlement(s, sx, sy) {
     ctx.textAlign = 'center';
     ctx.lineWidth = 3.5;
     ctx.strokeStyle = 'rgba(255,255,255,0.92)';
-    ctx.lineJoin = 'round';
     ctx.strokeText(s.shortName, 0, 22);
     ctx.fillStyle = conquered ? '#8a5a10' : '#5a6b48';
     ctx.fillText(s.shortName, 0, 22);
@@ -626,7 +506,7 @@ function drawSun() {
   ctx.strokeStyle = '#ffcf4d';
   ctx.lineWidth = 3;
   ctx.lineCap = 'round';
-  for (let i = 0; 0.5 + i * 8 <= 13; i++) {
+  for (let i = 0; i < 8; i++) {
     const a = (Math.PI * 2 / 8) * i;
     ctx.beginPath();
     ctx.moveTo(Math.cos(a) * 14, Math.sin(a) * 14);
@@ -674,9 +554,9 @@ function drawScaleBar() {
 }
 
 /* ================= 彩带粒子 ================= */
-function spawnConfetti(wx, wy) {
+function spawnConfetti(wx, wy, n = 30) {
   const [sx, sy] = worldToScreen(wx, wy);
-  for (let i = 0; i < 30; i++) {
+  for (let i = 0; i < n; i++) {
     const a = Math.random() * Math.PI * 2;
     const sp = 2 + Math.random() * 3.6;
     S.particles.push({
@@ -711,92 +591,69 @@ function stepParticles() {
   S.particles = S.particles.filter(p => p.life > 0 && p.y < S.cssH + 30);
 }
 
+/* 唯一的动画驱动：有动画/粒子时才跑 rAF，闲时停表 */
 let loopRunning = false;
-function loopTick() {
-  stepParticles();
-  render();
-}
 function ensureLoop() {
-  if (!loopRunning) {
-    loopRunning = true;
-    requestAnimationFrame(function tick() {
-      if (S.anims.length || S.particles.length) {
-        // 清理已完成的领土动画
-        S.anims = S.anims.filter(a => performance.now() - a.t0 < 950);
-        requestAnimationFrame(tick);
-      } else {
-        loopRunning = false;
-      }
-    });
-  }
+  if (loopRunning) return;
+  loopRunning = true;
+  requestAnimationFrame(function tick() {
+    S.anims = S.anims.filter(a => performance.now() - a.t0 < 950);
+    stepParticles();
+    render();
+    if (S.anims.length || S.particles.length) {
+      requestAnimationFrame(tick);
+    } else {
+      loopRunning = false;
+    }
+  });
 }
 
-/* ================= 游戏逻辑 ================= */
-function districtOf(s) { return s.districtTitle || (s.district + '郡'); }
-
-function computeScore() {
-  let score = 0;
-  const seen = new Set();
-  for (const s of S.stores) {
-    if (!isConquered(s)) continue;
-    let p = TIER_SCORE[s.tier] || 100;
-    if (s.remote) p = Math.round(p * REMOTE_MULT);
-    if (!seen.has(s.district)) { p += FRONTIER_BONUS; seen.add(s.district); }
-    score += p;
-  }
-  return score;
-}
-
-function areaStats() {
-  let all = 0, got = 0;
-  for (const c of S.cells) {
-    all += c.area;
-    if (isConquered(c.site)) got += c.area;
-  }
-  return { pct: all ? got / all * 100 : 0 };
-}
-
-function currentTitle(pct) {
-  let t = TITLES[0][1], next = null;
-  for (let i = 0; i < TITLES.length; i++) {
-    if (pct >= TITLES[i][0]) t = TITLES[i][1];
-    else { next = TITLES[i]; break; }
-  }
-  return { title: t, next };
-}
-
+/* ================= 打卡（唯一点亮入口） ================= */
 function conquer(storeId, opts = {}) {
   const s = S.stores.find(x => x.id === storeId);
-  if (!s || isConquered(s)) return null;
+  if (!s || isLit(s)) return null;
   const date = opts.date || new Date().toISOString().slice(0, 10);
+
+  const prevPct = C.areaShare(S.cells, S.visits).pct;
+  const prevTitle = C.titleFor(prevPct).title;
+
   S.visits.set(storeId, date);
   S.lastCheckIn = { storeId };
+  P[S.mode] = P[S.mode] || [];
+  P[S.mode] = P[S.mode].filter(r => r.storeId !== storeId);
+  P[S.mode].push({ storeId, date });
+  persist();
 
   const cell = S.cells.find(c => c.site.id === storeId);
   if (cell) S.anims.push({ cell, t0: performance.now() });
-  spawnConfetti(s.x, s.y);
   ensureLoop();
 
-  let gain = TIER_SCORE[s.tier] || 100;
-  const parts = [];
-  if (s.remote) { gain = Math.round(gain * REMOTE_MULT); parts.push('远征 ×1.5'); }
-  const before = new Set(S.stores.filter(x => S.visits.has(x.id) && x.id !== s.id).map(x => x.district));
-  if (!before.has(s.district)) { gain += FRONTIER_BONUS; parts.push('开疆 +' + FRONTIER_BONUS); }
-  S.score = computeScore();
+  const { gain, parts } = C.checkinGain(S.stores, S.visits, s);
+  S.score = C.computeScore(S.stores, S.visits);
+  const newPct = C.areaShare(S.cells, S.visits).pct;
+  const { title: newTitle, next } = C.titleFor(newPct);
+  const leveledUp = newTitle !== prevTitle;
+  if (leveledUp) spawnConfetti(s.x, s.y, 26);
+
   renderSidebar();
   showToast(
-    `<div class="big">点亮 ${s.shortName}${s.tier === 3 ? '王都' : ''}！</div>` +
-    `<div class="gain">+${gain} 战功${parts.length ? ' · ' + parts.join(' · ') : ''}</div>`
+    leveledUp
+      ? `<div class="big">晋升 · ${newTitle}！</div><div class="gain">点亮 ${s.shortName} +${gain} 战功${parts.length ? ' · ' + parts.join(' · ') : ''}</div>`
+      : `<div class="big">点亮 ${s.shortName}${s.tier === 3 ? '王都' : ''}！</div><div class="gain">+${gain} 战功${parts.length ? ' · ' + parts.join(' · ') : ''}${next ? '' : ' · 已至制霸之巅'}</div>`,
+    leveledUp ? 'levelup' : ''
   );
   return { store: s, gain };
 }
 
 function undoCheckIn() {
   if (!S.lastCheckIn) return;
-  const s = S.stores.find(x => x.id === S.lastCheckIn.storeId);
-  S.visits.delete(S.lastCheckIn.storeId);
+  const id = S.lastCheckIn.storeId;
+  const s = S.stores.find(x => x.id === id);
+  S.visits.delete(id);
   S.lastCheckIn = null;
-  S.score = computeScore();
+  P[S.mode] = (P[S.mode] || []).filter(r => r.storeId !== id);
+  persist();
+  S.score = C.computeScore(S.stores, S.visits);
   renderSidebar();
   render();
   showToast(`<div class="big">已撤销「${s ? s.shortName : ''}」的打卡</div><div class="gain">领地重回迷雾</div>`);
@@ -804,13 +661,14 @@ function undoCheckIn() {
 
 /* ================= 侧栏 ================= */
 function fmtScore(n) { return n.toLocaleString('en-US'); }
+function districtOf(s) { return s.districtTitle || (s.district + '郡'); }
 
 function renderSidebar() {
   const total = S.stores.length;
-  const got = S.stores.filter(isConquered).length;
-  const { pct } = areaStats();
-  const { title, next } = currentTitle(pct);
-  S.score = computeScore();
+  const got = S.stores.filter(isLit).length;
+  const { pct } = C.areaShare(S.cells, S.visits);
+  const { title, next } = C.titleFor(pct);
+  S.score = C.computeScore(S.stores, S.visits);
 
   document.getElementById('modeBadge').textContent = S.mode === 'demo' ? '演示数据' : '真实数据';
   document.getElementById('modeBadge').className = 'badge' + (S.mode === 'demo' ? '' : ' real');
@@ -818,24 +676,27 @@ function renderSidebar() {
   document.getElementById('nextTitle').textContent = next
     ? `距「${next[1]}」还差 ${(next[0] - pct).toFixed(1)}% 版图`
     : '已至制霸之巅';
-  const prev = TITLES.filter(t => pct >= t[0]).pop()[0];
+  const prev = C.TITLES.filter(t => pct >= t[0]).pop()[0];
   document.getElementById('titleBar').style.width =
     (next ? clamp((pct - prev) / (next[0] - prev) * 100, 2, 100) : 100) + '%';
   document.getElementById('stArea').textContent = pct.toFixed(1);
   document.getElementById('areaBar').style.width = clamp(pct, 1, 100) + '%';
   document.getElementById('stStores').textContent = got;
   document.getElementById('stStoresAll').textContent = total;
-  document.getElementById('stDistricts').textContent = new Set(S.stores.filter(isConquered).map(s => s.district)).size;
+  document.getElementById('stDistricts').textContent = new Set(S.stores.filter(isLit).map(s => s.district)).size;
   document.getElementById('stDistrictsAll').textContent = new Set(S.stores.map(s => s.district)).size;
-  document.getElementById('stCapitals').textContent = S.stores.filter(s => isConquered(s) && s.tier === 3).length;
+  document.getElementById('stCapitals').textContent = S.stores.filter(s => isLit(s) && s.tier === 3).length;
   document.getElementById('stScore').textContent = fmtScore(S.score);
   document.getElementById('undoBtn').classList.toggle('show', !!S.lastCheckIn);
+
+  renderGoal();
+  renderBadges();
 
   const byDistrict = {};
   for (const s of S.stores) {
     const d = byDistrict[s.district] = byDistrict[s.district] || { title: districtOf(s), all: 0, got: 0 };
     d.all++;
-    if (isConquered(s)) d.got++;
+    if (isLit(s)) d.got++;
   }
   const rows = Object.values(byDistrict).sort((a, b) => (b.got - a.got) || (b.all - a.all));
   document.getElementById('districtRows').innerHTML = rows.map(d => {
@@ -859,6 +720,30 @@ function renderSidebar() {
   animateScore();
 }
 
+/* 下一目标卡 */
+function renderGoal() {
+  const goal = C.nextGoal(S.stores, S.cells, S.visits);
+  const el = document.getElementById('goalCard');
+  if (goal.type === 'done') {
+    el.innerHTML = `<div class="goal done">👑 ${goal.text}</div>`;
+    return;
+  }
+  el.innerHTML =
+    `<div class="goal"><div class="g-label">下一个目标</div><div class="g-text">${goal.text}</div></div>` +
+    (goal.store ? `<button class="ci-btn goal-btn" data-id="${goal.store.id}">打卡它</button>` : '');
+  const btn = el.querySelector('.goal-btn');
+  if (btn) btn.addEventListener('click', () => openCheckin(goal.store.id));
+}
+
+/* 成就徽章墙 */
+function renderBadges() {
+  const badges = C.evaluateBadges(S.stores, S.cells, S.visits);
+  document.getElementById('badgeWall').innerHTML = badges.map(b =>
+    `<div class="bcell ${b.done ? 'done' : ''}" title="${b.name}：${b.desc}">` +
+    `<span class="bicon">${b.icon}</span><span class="bname">${b.name}</span></div>`
+  ).join('');
+}
+
 let scoreAnim = null;
 function animateScore() {
   const el = document.getElementById('stScore');
@@ -873,56 +758,118 @@ function animateScore() {
   })();
 }
 
-/* ================= 交互 ================= */
-function pickHover(sx, sy) {
+/* ================= 交互（Pointer Events，鼠标/触摸统一） ================= */
+const pointers = new Map();   // pointerId -> {x, y}
+let pinchStart = null;        // {dist, mid:{x,y}, view:{k,tx,ty}}
+
+function eventPos(e) {
+  const rect = canvas.getBoundingClientRect();
+  return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+}
+function pickHover(px, py) {
   let best = null, bestD = 18 * 18 / S.view.k;
   for (const s of S.stores) {
-    const d = (s.x - (sx - S.view.tx) / S.view.k) ** 2 + (s.y - (sy - S.view.ty) / S.view.k) ** 2;
+    const d = (s.x - (px - S.view.tx) / S.view.k) ** 2 + (s.y - (py - S.view.ty) / S.view.k) ** 2;
     if (d < bestD) { bestD = d; best = s; }
   }
   return best;
 }
 
-canvas.addEventListener('mousemove', e => {
-  if (S.tooltipPinned) return;
+canvas.addEventListener('pointerdown', e => {
+  canvas.setPointerCapture(e.pointerId);
+  pointers.set(e.pointerId, eventPos(e));
+  if (pointers.size === 1) {
+    S.dragging = true; S.dragMoved = false;
+    S.dragStart = [e.clientX, e.clientY];
+    S.viewStart = { ...S.view };
+    canvas.classList.add('dragging');
+  } else if (pointers.size === 2) {
+    const [p1, p2] = [...pointers.values()];
+    pinchStart = {
+      dist: Math.hypot(p1.x - p2.x, p1.y - p2.y),
+      mid: { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 },
+      view: { ...S.view },
+    };
+  }
+});
+
+canvas.addEventListener('pointermove', e => {
+  const pos = eventPos(e);
+  if (!pointers.has(e.pointerId)) {
+    // 无按下的悬停（鼠标）
+    if (S.tooltipPinned) return;
+    hoverAt(pos, e);
+    return;
+  }
+  pointers.set(e.pointerId, pos);
+  if (pointers.size === 2 && pinchStart) {
+    const [p1, p2] = [...pointers.values()];
+    const dist = Math.hypot(p1.x - p2.x, p1.y - p2.y);
+    const mid = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
+    const k2 = clamp(pinchStart.view.k * dist / Math.max(pinchStart.dist, 1), 0.5, 6);
+    const [wx, wy] = [
+      (pinchStart.mid.x - pinchStart.view.tx) / pinchStart.view.k,
+      (pinchStart.mid.y - pinchStart.view.ty) / pinchStart.view.k,
+    ];
+    S.view.k = k2;
+    S.view.tx = mid.x - wx * k2;
+    S.view.ty = mid.y - wy * k2;
+    S.dragMoved = true;
+    hideTooltip();
+    render();
+    return;
+  }
   if (S.dragging) {
     const dx = e.clientX - S.dragStart[0], dy = e.clientY - S.dragStart[1];
     if (Math.abs(dx) + Math.abs(dy) > 3) S.dragMoved = true;
     S.view.tx = S.viewStart.tx + dx;
     S.view.ty = S.viewStart.ty + dy;
+    hideTooltip();
     render();
-    return;
   }
-  const rect = canvas.getBoundingClientRect();
-  const s = pickHover(e.clientX - rect.left, e.clientY - rect.top);
+});
+
+function endPointer(e) {
+  pointers.delete(e.pointerId);
+  if (pointers.size < 2) pinchStart = null;
+  if (pointers.size === 0) {
+    S.dragging = false;
+    canvas.classList.remove('dragging');
+  }
+}
+canvas.addEventListener('pointerup', endPointer);
+canvas.addEventListener('pointercancel', endPointer);
+canvas.addEventListener('pointerleave', e => {
+  if (!pointers.has(e.pointerId) && !S.tooltipPinned) hideTooltip();
+});
+
+function hoverAt(pos, e) {
+  const s = pickHover(pos.x, pos.y);
   const prev = S.hover;
   S.hover = s ? { site: s, cell: S.cells.find(c => c.site === s) } : null;
   if (s !== (prev && prev.site)) render();
   if (s) {
-    const got = isConquered(s);
+    const got = isLit(s);
     tooltip.style.display = 'block';
     tooltip.innerHTML =
       `<div class="t-name">${got ? '📍 ' : ''}${s.name}</div>` +
-      `<div class="t-line">${districtOf(s)} · ${TIER_NAME[s.tier]}${s.open24h ? ' · 24h' : ''}</div>` +
+      `<div class="t-line">${districtOf(s)} · ${C.TIER_NAME[s.tier]}${s.open24h ? ' · 24h' : ''}</div>` +
       (got
         ? `<div class="t-line">已点亮（${S.visits.get(s.id) || '—'}）</div>`
-        : `<div class="t-line">尚未点亮 · 打卡可得 ${TIER_SCORE[s.tier] * (s.remote ? REMOTE_MULT : 1) | 0} 战功${s.remote ? '（远郊 ×1.5）' : ''}</div>` +
+        : `<div class="t-line">尚未点亮 · 打卡可得 ${C.checkinGain(S.stores, S.visits, s).gain} 战功${s.remote ? '（远郊加成）' : ''}</div>` +
           `<button class="tt-btn" data-id="${s.id}">我吃了这家 · 打卡</button>`);
-    tooltip.style.left = Math.min(e.clientX - rect.left + 16, S.cssW - 260) + 'px';
-    tooltip.style.top = (e.clientY - rect.top + 14) + 'px';
+    tooltip.style.left = clamp(pos.x + 16, 6, S.cssW - 260) + 'px';
+    tooltip.style.top = clamp(pos.y + 14, 6, S.cssH - 150) + 'px';
     canvas.style.cursor = 'pointer';
   } else {
-    tooltip.style.display = 'none';
+    hideTooltip();
     canvas.style.cursor = 'grab';
   }
-});
-
-canvas.addEventListener('mouseleave', () => {
-  if (S.tooltipPinned) return;
+}
+function hideTooltip() {
   tooltip.style.display = 'none';
-  S.hover = null;
-  render();
-});
+  if (S.hover) { S.hover = null; render(); }
+}
 
 tooltip.addEventListener('mouseenter', () => { S.tooltipPinned = true; });
 tooltip.addEventListener('mouseleave', () => {
@@ -934,54 +881,48 @@ tooltip.addEventListener('mouseleave', () => {
 tooltip.addEventListener('click', e => {
   const btn = e.target.closest('.tt-btn');
   if (btn) {
-    tooltip.style.display = 'none';
+    hideTooltip();
     S.tooltipPinned = false;
     conquer(btn.dataset.id);
   }
 });
 
-canvas.addEventListener('mousedown', e => {
-  S.dragging = true; S.dragMoved = false;
-  S.dragStart = [e.clientX, e.clientY];
-  S.viewStart = { ...S.view };
-  canvas.classList.add('dragging');
-});
-window.addEventListener('mouseup', () => {
-  S.dragging = false;
-  canvas.classList.remove('dragging');
-});
-
 canvas.addEventListener('click', e => {
-  if (S.dragMoved) return;
-  const rect = canvas.getBoundingClientRect();
-  const s = pickHover(e.clientX - rect.left, e.clientY - rect.top);
+  if (S.dragMoved) { S.dragMoved = false; return; }
+  const pos = eventPos(e);
+  const s = pickHover(pos.x, pos.y);
   if (!s) return;
-  if (isConquered(s)) {
+  if (isLit(s)) {
     showToast(`<div class="big">📍 ${s.shortName}</div><div class="gain">已于 ${S.visits.get(s.id) || '—'} 点亮</div>`);
   } else {
-    openCheckin(s.id);   // 明确的"我吃了这家"确认，不搞一键秒点
+    openCheckin(s.id);
   }
 });
 
 canvas.addEventListener('wheel', e => {
   e.preventDefault();
-  const rect = canvas.getBoundingClientRect();
-  const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
-  const [wx, wy] = screenToWorld(sx, sy);
+  const pos = eventPos(e);
+  const [wx, wy] = [(pos.x - S.view.tx) / S.view.k, (pos.y - S.view.ty) / S.view.k];
   const k2 = clamp(S.view.k * Math.exp(-e.deltaY * 0.0012), 0.5, 6);
   S.view.k = k2;
-  S.view.tx = sx - wx * k2;
-  S.view.ty = sy - wy * k2;
+  S.view.tx = pos.x - wx * k2;
+  S.view.ty = pos.y - wy * k2;
   render();
 }, { passive: false });
 
 canvas.addEventListener('dblclick', () => { fitView(); render(); });
 window.addEventListener('resize', resize);
 
-/* ================= 用餐打卡 ================= */
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    document.getElementById('checkin').classList.remove('show');
+    document.getElementById('help').classList.remove('show');
+  }
+});
+
+/* ================= 用餐打卡弹窗 ================= */
 function openCheckin(highlightId) {
-  const overlay = document.getElementById('checkin');
-  overlay.classList.add('show');
+  document.getElementById('checkin').classList.add('show');
   const input = document.getElementById('ciSearch');
   input.value = '';
   renderCheckinList('', highlightId);
@@ -996,7 +937,7 @@ function closeCheckin() { document.getElementById('checkin').classList.remove('s
 
 function renderCheckinList(filter, highlightId) {
   const list = document.getElementById('ciList');
-  const unconq = S.stores.filter(s => !isConquered(s));
+  const unconq = S.stores.filter(s => !isLit(s));
   const f = (filter || '').toLowerCase();
   const match = s => !f ||
     s.name.toLowerCase().includes(f) ||
@@ -1015,11 +956,10 @@ function renderCheckinList(filter, highlightId) {
       <canvas class="ci-icon" width="60" height="60" data-tier="${s.tier}"></canvas>
       <div class="ci-main">
         <div class="ci-name">${s.shortName}</div>
-        <div class="ci-sub">${districtOf(s)} · ${TIER_NAME[s.tier]}${s.remote ? ' · 远郊' : ''} · +${TIER_SCORE[s.tier] * (s.remote ? REMOTE_MULT : 1) | 0} 战功</div>
+        <div class="ci-sub">${districtOf(s)} · ${C.TIER_NAME[s.tier]}${s.remote ? ' · 远郊' : ''} · +${C.checkinGain(S.stores, S.visits, s).gain} 战功</div>
       </div>
       <button class="ci-btn" data-id="${s.id}">打卡</button>
     </div>`).join('');
-  // 小图标
   for (const c of list.querySelectorAll('canvas.ci-icon')) {
     const g = c.getContext('2d');
     g.scale(2, 2);
@@ -1039,7 +979,22 @@ document.getElementById('checkin').addEventListener('click', e => {
 
 document.getElementById('btnCheckin').addEventListener('click', () => openCheckin());
 document.getElementById('undoBtn').addEventListener('click', undoCheckIn);
-document.getElementById('btnReset').addEventListener('click', () => {
+
+/* 重置演示：二次确认（按钮文字变化），防误触清空打卡 */
+let resetArmed = false, resetTimer = null;
+document.getElementById('btnReset').addEventListener('click', e => {
+  const btn = e.currentTarget;
+  if (!resetArmed) {
+    resetArmed = true;
+    btn.textContent = '确认重置?';
+    resetTimer = setTimeout(() => { resetArmed = false; btn.textContent = '重置演示'; }, 3000);
+    return;
+  }
+  clearTimeout(resetTimer);
+  resetArmed = false;
+  btn.textContent = '重置演示';
+  P.demo = [];
+  persist();
   S.mode = 'demo';
   S.stores = window.MC_KINGDOM_DEMO.stores;
   S.city = window.MC_KINGDOM_DEMO.city;
@@ -1073,38 +1028,172 @@ document.getElementById('fileInput').addEventListener('change', async e => {
 
 document.getElementById('btnHelp').addEventListener('click', () => document.getElementById('help').classList.add('show'));
 document.getElementById('help').addEventListener('click', e => {
-  if (e.target.id === 'help' || e.target.id === 'helpClose') e.target.closest('.overlay').classList.remove('show');
+  if (e.target.id === 'help' || e.target.id === 'helpClose') {
+    e.target.closest('.overlay').classList.remove('show');
+    P.seenHelp = true;
+    persist();
+  }
 });
+
+/* ================= 战绩分享卡 ================= */
+function makeShareCard() {
+  const saved = { ...S.view };
+  fitView(); render();
+  const snap = document.createElement('canvas');
+  snap.width = canvas.width; snap.height = canvas.height;
+  snap.getContext('2d').drawImage(canvas, 0, 0);
+  Object.assign(S.view, saved);
+  render();
+
+  const W = 900, H = 1280, SC = 2;
+  const card = document.createElement('canvas');
+  card.width = W * SC; card.height = H * SC;
+  const g = card.getContext('2d');
+  g.scale(SC, SC);
+  const rnd = mulberry32(hashStr(S.city + S.visits.size));
+
+  // 底色 + 彩点
+  g.fillStyle = '#fff8ec';
+  g.fillRect(0, 0, W, H);
+  for (let i = 0; i < 40; i++) {
+    g.fillStyle = CONFETTI_COLORS[i % CONFETTI_COLORS.length];
+    g.globalAlpha = 0.14;
+    g.save();
+    g.translate(rnd() * W, rnd() * H);
+    g.rotate(rnd() * Math.PI);
+    g.fillRect(-5, -2, 10, 4);
+    g.restore();
+  }
+  g.globalAlpha = 1;
+
+  // 顶栏
+  g.fillStyle = '#da291c';
+  g.beginPath(); g.roundRect(36, 40, 56, 56, 14); g.fill();
+  g.fillStyle = '#ffc72c';
+  g.font = '900 40px ' + FONT;
+  g.textAlign = 'center';
+  g.fillText('M', 64, 84);
+  g.fillStyle = '#da291c';
+  g.font = '900 40px ' + FONT;
+  g.textAlign = 'left';
+  g.fillText('麦门制霸图', 110, 84);
+  g.fillStyle = '#8a6a2e';
+  g.font = '600 18px ' + FONT;
+  g.fillText(`${S.city} · ${new Date().toISOString().slice(0, 10)}`, 110, 110);
+
+  // 地图快照（圆角裁剪，裁上下居中 820x540）
+  const mw = 820, mh = 540, mx = 40, my = 140;
+  g.save();
+  g.beginPath(); g.roundRect(mx, my, mw, mh, 24); g.clip();
+  g.fillStyle = '#bfe6fb';
+  g.fillRect(mx, my, mw, mh);
+  const sw = snap.width, sh = snap.height;
+  const drawH = mw / sw * sh;
+  g.drawImage(snap, mx, my + (mh - drawH) / 2, mw, drawH);
+  g.restore();
+  g.strokeStyle = '#ffc72c';
+  g.lineWidth = 6;
+  g.beginPath(); g.roundRect(mx, my, mw, mh, 24); g.stroke();
+
+  // 数据
+  const { pct } = C.areaShare(S.cells, S.visits);
+  const { title } = C.titleFor(pct);
+  const got = S.stores.filter(isLit).length;
+  const districts = new Set(S.stores.filter(isLit).map(s => s.district)).size;
+  const badges = C.evaluateBadges(S.stores, S.cells, S.visits);
+
+  g.textAlign = 'center';
+  g.fillStyle = '#4a3313';
+  g.font = '700 20px ' + FONT;
+  const stats = [
+    ['版图', pct.toFixed(1) + '%'],
+    ['城邦', `${got}/${S.stores.length}`],
+    ['战功', fmtScore(S.score)],
+    ['郡', `${districts}/${new Set(S.stores.map(s => s.district)).size}`],
+  ];
+  const cw = (W - 80) / 4;
+  stats.forEach(([k, v], i) => {
+    const x = 40 + cw * i + cw / 2;
+    g.fillStyle = '#a8823c';
+    g.font = '700 16px ' + FONT;
+    g.fillText(k, x, 736);
+    g.fillStyle = i === 0 ? '#da291c' : '#4a3313';
+    g.font = '900 34px ' + FONT;
+    g.fillText(v, x, 774);
+  });
+
+  // 称号横幅
+  g.fillStyle = '#da291c';
+  g.beginPath(); g.roundRect(W / 2 - 240, 810, 480, 64, 32); g.fill();
+  g.fillStyle = '#fff';
+  g.font = '900 30px ' + FONT;
+  g.fillText(title, W / 2, 852);
+
+  // 徽章行
+  g.font = '900 26px ' + FONT;
+  badges.forEach((b, i) => {
+    const x = W / 2 + (i - (badges.length - 1) / 2) * 64;
+    g.beginPath();
+    g.arc(x, 940, 24, 0, Math.PI * 2);
+    g.fillStyle = b.done ? '#ffc72c' : '#eadfbe';
+    g.fill();
+    g.fillStyle = b.done ? '#da291c' : '#c4b88f';
+    g.fillText(b.icon, x, 950);
+  });
+
+  // 底部 slogan
+  g.fillStyle = '#8a6a2e';
+  g.font = '800 30px ' + FONT;
+  g.fillText('全城制霸 · 吃遍麦门', W / 2, 1058);
+  g.font = '600 16px ' + FONT;
+  g.fillStyle = '#b09256';
+  g.fillText('麦门制霸图 m-king · 打卡你的每一次麦门朝圣', W / 2, 1092);
+  // 金拱门剪影
+  g.strokeStyle = '#ffc72c';
+  g.lineWidth = 10;
+  g.lineCap = 'round';
+  g.beginPath();
+  g.arc(W / 2 - 20, 1160, 34, Math.PI, 0);
+  g.arc(W / 2 + 20, 1160, 34, Math.PI, 0);
+  g.stroke();
+
+  const a = document.createElement('a');
+  a.download = `麦门制霸图-${S.city}-${new Date().toISOString().slice(0, 10)}.png`;
+  a.href = card.toDataURL('image/png');
+  a.click();
+  showToast('<div class="big">战绩卡已生成</div><div class="gain">已开始下载，晒出去吧</div>');
+}
+document.getElementById('btnShare').addEventListener('click', makeShareCard);
 
 /* ================= toast ================= */
 let toastTimer = null;
-function showToast(html) {
+function showToast(html, cls = '') {
   const t = document.getElementById('toast');
   t.innerHTML = html;
-  t.classList.add('show');
+  t.className = 'show ' + cls;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.classList.remove('show'), 2800);
+  toastTimer = setTimeout(() => { t.className = ''; }, 3000);
 }
 
 /* ================= 图例 ================= */
 function drawLegend() {
   const box = document.getElementById('legend');
-  const mk = (label, tier, conquered) => {
+  const mk = (label, tier) => {
     const c = document.createElement('canvas');
     c.width = 88; c.height = 60;
     const g = c.getContext('2d');
     g.scale(2, 2);
     g.translate(22, 20);
-    drawIconOn(g, tier, conquered);
+    drawIconOn(g, tier, true);
     const div = document.createElement('div');
     div.className = 'li';
     div.appendChild(c);
     div.insertAdjacentHTML('beforeend', `<span>${label}</span>`);
     box.appendChild(div);
   };
-  mk('王都 · 旗舰', 3, true);
-  mk('城镇 · 商场店', 2, true);
-  mk('甜品站 · 街角店', 1, true);
+  mk('王都 · 旗舰', 3);
+  mk('城镇 · 商场店', 2);
+  mk('甜品站 · 街角店', 1);
   const swatch = (fill, stroke, label) => {
     const c = document.createElement('canvas');
     c.width = 88; c.height = 60;
@@ -1113,9 +1202,7 @@ function drawLegend() {
     g.fillStyle = fill;
     g.beginPath(); g.roundRect(6, 8, 32, 20, 6); g.fill();
     if (stroke) { g.strokeStyle = stroke; g.lineWidth = 2.4; g.stroke(); }
-    else {
-      drawCloud(g, 14, 12, 9, 0.95);
-    }
+    else drawCloud(g, 14, 12, 9, 0.95);
     const div = document.createElement('div');
     div.className = 'li';
     div.appendChild(c);
@@ -1131,6 +1218,7 @@ function drawLegend() {
   resize();
   await loadData();
   drawLegend();
-  window.__MCK = { S, conquer, undoCheckIn, openCheckin };  // 调试/测试句柄
+  if (!P.seenHelp) document.getElementById('help').classList.add('show');
+  window.__MCK = { S, conquer, undoCheckIn, openCheckin, core: C, persist: P };  // 调试/测试句柄
 })();
 })();
