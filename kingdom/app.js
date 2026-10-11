@@ -88,17 +88,41 @@ async function loadData() {
 let landRect = null;
 
 function build() {
-  const { W, H, kmPerUnit } = C.projectStores(S.stores);
-  S.W = W; S.H = H; S.kmPerUnit = kmPerUnit;
+  const { W, H, kmPerUnit, toWorld } = C.projectStores(S.stores);
+  S.W = W; S.H = H; S.kmPerUnit = kmPerUnit; S.toWorld = toWorld;
   const inset = 7;
   landRect = { x: inset, y: inset, w: W - inset * 2, h: H - inset * 2, r: 30 };
   S.cells = C.voronoi(S.stores, { x0: 0, y0: 0, x1: W, y1: H });
   S.roads = C.buildRoads(S.stores);
+  buildRings();
   document.getElementById('cityName').textContent = '· ' + S.city;
   fitView();
   ensureLoop();
   render();
   renderSidebar();
+}
+
+/* 北京环线（近似示意，锚定真实地理方位；仅北京数据启用） */
+const CITY_RINGS = {
+  '北京': [
+    { name: '二环', n: 39.948, s: 39.860, w: 116.353, e: 116.445 },
+    { name: '三环', n: 39.972, s: 39.838, w: 116.306, e: 116.488 },
+    { name: '四环', n: 40.008, s: 39.800, w: 116.254, e: 116.548 },
+    { name: '五环', n: 40.092, s: 39.700, w: 116.128, e: 116.672 },
+  ],
+};
+let ringPaths = null;
+function buildRings() {
+  const rings = CITY_RINGS[S.city];
+  if (!rings) { ringPaths = []; return; }
+  const cornerR = 2.2 / S.kmPerUnit;   // 环路转角圆弧半径约 2.2km
+  ringPaths = rings.map(r => {
+    const [x0, y0] = S.toWorld(r.n, r.w);
+    const [x1, y1] = S.toWorld(r.s, r.e);
+    const path = new Path2D();
+    path.roundRect(x0, y0, x1 - x0, y1 - y0, cornerR);
+    return { name: r.name, path, label: S.toWorld((r.n + r.s) / 2, r.w) };
+  });
 }
 
 /* ================= 天空背景（缓存） ================= */
@@ -234,6 +258,7 @@ function render() {
 
   drawRiver();
   drawScenery();
+  drawRings();
 
   // 道路
   ctx.setLineDash([9, 7]);
@@ -446,7 +471,9 @@ function drawSettlement(s, sx, sy) {
   const k = S.view.k;
   ctx.save();
   ctx.translate(sx, sy);
-  if (s.tier === 1 && !conquered && k < 1.35) {
+  // 低倍缩放时：未点亮的小店缩为圆点，避免密集区图标堆叠
+  const asDot = !conquered && s.tier < 3 && (s.tier === 1 ? k < 1.35 : k < 0.95);
+  if (asDot) {
     ctx.fillStyle = 'rgba(255,255,255,0.95)';
     ctx.beginPath(); ctx.arc(0, 0, 4.6, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = '#9fb98a';
@@ -551,6 +578,31 @@ function drawScaleBar() {
   ctx.textAlign = 'left';
   ctx.fillText(nice + ' km', x + px + 8, y + 1);
   ctx.restore();
+}
+
+function drawRings() {
+  if (!ringPaths || !ringPaths.length) return;
+  for (const { path, label, name } of ringPaths) {
+    ctx.strokeStyle = 'rgba(228,213,172,0.9)';
+    ctx.lineWidth = 6.5;
+    ctx.stroke(path);
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 3.6;
+    ctx.stroke(path);
+    // 环路名标牌
+    const [lx, ly] = [label[0] + 14 / S.view.k, label[1]];
+    ctx.save();
+    ctx.font = '800 11px ' + FONT;
+    ctx.textAlign = 'left';
+    const w = ctx.measureText(name).width + 10;
+    ctx.fillStyle = 'rgba(120,90,40,0.75)';
+    ctx.beginPath();
+    ctx.roundRect(lx, ly - 9, w, 18, 9);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.fillText(name, lx + 5, ly + 4);
+    ctx.restore();
+  }
 }
 
 /* ================= 彩带粒子 ================= */
@@ -1215,10 +1267,15 @@ function drawLegend() {
 
 /* ================= 启动 ================= */
 (async function main() {
-  resize();
-  await loadData();
-  drawLegend();
-  if (!P.seenHelp) document.getElementById('help').classList.add('show');
+  try {
+    resize();
+    await loadData();
+    drawLegend();
+    if (!P.seenHelp) document.getElementById('help').classList.add('show');
+  } catch (e) {
+    console.error('[麦门制霸图] 启动失败:', e);
+    window.__MCK_BOOT_ERR = (e && e.stack) || String(e);
+  }
   window.__MCK = { S, conquer, undoCheckIn, openCheckin, core: C, persist: P };  // 调试/测试句柄
 })();
 })();

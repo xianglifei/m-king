@@ -40,6 +40,24 @@ test('voronoi: 面积守恒且每个 cell 包含自己的 site', () => {
   }
 });
 
+/* 回归：真实北京数据里最西南角的"燕山"曾是薄楔形 cell，连续裁剪下被数值退化裁空，
+ * 导致 render 读 poly[0] 崩溃。任何演示/真实数据都必须保证 cell 非空。 */
+test('voronoi: 真实演示数据（115 店，含极端角点）全部 cell 非空', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const src = fs.readFileSync(path.join(__dirname, '../../kingdom/data-demo.js'), 'utf8');
+  global.window = global.window || {};
+  new Function(src)();
+  const stores = global.window.MC_KINGDOM_DEMO.stores;
+  const { W, H } = C.projectStores(stores);
+  const cells = C.voronoi(stores, { x0: 0, y0: 0, x1: W, y1: H });
+  const empty = cells.filter(c => c.poly.length < 3);
+  assert.strictEqual(empty.length, 0, '存在空 cell: ' + empty.map(c => c.site.shortName).join(','));
+  // 面积仍守恒（允许兜底略大，误差 1% 内）
+  const total = cells.reduce((a, c) => a + c.area, 0);
+  assert.ok(Math.abs(total - W * H) / (W * H) < 0.01, `面积和偏差过大: ${total} vs ${W * H}`);
+});
+
 test('pointInPoly: 边界内外判定', () => {
   const sq = [[0, 0], [10, 0], [10, 10], [0, 10]];
   assert.strictEqual(C.pointInPoly([5, 5], sq), true);
