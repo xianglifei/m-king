@@ -242,3 +242,30 @@ MCP 调用天然会失败（门店收藏为空、某个履约方式无可用门�
 - **网络**：本地服务仅监听 `127.0.0.1`
 - **静态文件**：做了目录穿越防护，访问范围限制在项目目录内
 - **调试接口**：`/api/tool` 带工具名白名单正则校验
+
+---
+
+## 7. v2 麦门制霸图（kingdom/）的 MCP 集成
+
+v2 是一张把全城麦当劳门店画成 Q 版游戏地图的打卡版图。页面本体是零依赖静态应用（内置虚构演示数据），与 MCP 的连接由**数据桥接脚本**完成：[`kingdom/tools/fetch_mcd_data.py`](kingdom/tools/fetch_mcd_data.py)（Python 3.9+ 标准库实现，零第三方依赖）。
+
+### 工具与调用链
+
+| 步骤 | Tool | 用法 | 业务价值 |
+|---|---|---|---|
+| ① 能力发现 | `tools/list` | 读取 `query-nearby-stores` 的 inputSchema，探测是否支持经纬度入参 | 决定"网格扫描"还是"城市关键词"两条取数路径 |
+| ② 门店清单 | `query-nearby-stores` | 路径 A：对城市 bbox 按 ~6km 网格逐一调用（`beType:1, searchType:1` + 经纬度）；路径 B：不支持坐标入参时按 `searchType:2` 城市×关键词搜索 | 拿到全城门店清单（storeCode/storeName），这是"城邦"的本体 |
+| ③ 门店坐标 | 同上（距离字段） | 麦当劳 MCP 不返回门店经纬度。若返回体带 distance，用 ≥3 个不同调用原点的距离做**三边定位最小二乘**反推坐标；否则取首次出现的网格单元 | 地图空间关系成立的前提；精度记入 `accuracy` 字段（trilaterated / grid-cell / order-only） |
+| ④ 征服记录 | `order-list` | 拉取历史订单，按 storeCode/门店名聚合为"已点亮城邦" | 把真实消费记录变成游戏进度 |
+
+### 与 v1 的差异
+
+- v1 是**在线调用链**（点卡片即真实请求），v2 是**离线数据管道**（脚本一次性拉数据落盘为 `data/stores.json` + `data/visits.json`，页面读本地文件）——避免把批量门店查询放进页面请求路径
+- 手动打卡（`localStorage`）补足 `order-list` 只返回最近约 10 单的历史缺口；`visits.json` 为累积档案，重复运行只合并不覆盖
+
+### 合规与安全
+
+- 全程**只读**（tools/list / query-nearby-stores / order-list），不调用任何写入类 Tool
+- 脚本内置调用间隔（默认 0.8s，`--sleep` 可调大），总调用量与网格步长可控，遵守麦当劳 MCP 服务规则关于批量/高频调用的约束
+- `--sanitize` 一键生成脱敏版（门店名→「示例门店A/B/C」、区县归并、storeCode 置空）：真实门店名≈位置信息，公开分享/部署前必须脱敏
+- `kingdom/data/` 已在 `.gitignore`，真实数据不入库
