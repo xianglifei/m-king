@@ -39,7 +39,7 @@ const TITLES = [
  * 返回画布世界尺寸与比例尺信息；坐标写入 store.x / store.y。
  */
 function projectStores(stores, opts = {}) {
-  if (!stores.length) return { W: 1000, H: 600, kmPerUnit: 1 };
+  if (!stores.length) return { W: 1000, H: 600, kmPerUnit: 1, toWorld: () => [0, 0] };
   const lats = stores.map(s => s.lat), lngs = stores.map(s => s.lng);
   const lat0 = Math.min(...lats), lat1 = Math.max(...lats);
   const lng0 = Math.min(...lngs), lng1 = Math.max(...lngs);
@@ -55,26 +55,34 @@ function projectStores(stores, opts = {}) {
     s.y = H / 2 - (s.lat - my) / spanY * H / pad;
   }
   const kmPerUnit = ((spanX + spanY) / 2 * 111.32) / ((W / pad + H / pad) / 2);
-  return { W, H, kmPerUnit };
+  // 经纬度 → 世界坐标（与门店同一套投影，供环线等地理元素复用）
+  const toWorld = (lat, lng) => [
+    W / 2 + (lng - mx) / spanX * W / pad,
+    H / 2 - (lat - my) / spanY * H / pad,
+  ];
+  return { W, H, kmPerUnit, toWorld };
 }
 
 /* ================= Voronoi ================= */
 function clipBisector(poly, p, q) {
   // 保留距 p 更近的半平面：2(q-p)·x <= |q|²-|p|²
   const dx = q.x - p.x, dy = q.y - p.y;
+  if (dx === 0 && dy === 0) return poly;   // 重合点：该 bisector 不产生约束
   const c = (q.x * q.x + q.y * q.y - p.x * p.x - p.y * p.y) / 2;
   const out = [];
   for (let i = 0; i < poly.length; i++) {
     const a = poly[i], b = poly[(i + 1) % poly.length];
     const fa = dx * a[0] + dy * a[1] - c;
     const fb = dx * b[0] + dy * b[1] - c;
-    if (fa <= 1e-9) out.push(a);
-    if ((fa < -1e-9 && fb > 1e-9) || (fa > 1e-9 && fb < -1e-9)) {
+    if (fa <= 0) out.push(a);
+    if ((fa < 0) !== (fb < 0)) {
       const t = fa / (fa - fb);
-      out.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]);
+      const ix = a[0] + (b[0] - a[0]) * t, iy = a[1] + (b[1] - a[1]) * t;
+      if (Number.isFinite(ix) && Number.isFinite(iy)) out.push([ix, iy]);
     }
   }
-  return out;
+  // 数值兜底：极端薄楔形在连续裁剪下可能退化，宁可保留略大的原多边形也不让它消失
+  return out.length >= 3 ? out : poly;
 }
 
 function voronoi(sites, bbox) {
