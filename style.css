@@ -1,0 +1,167 @@
+/* 麦门制霸图 · 样式 */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  --ink: #2f2317;
+  --ink-soft: #6b5233;
+  --paper: #efe4c7;
+  --paper-dark: #e3d5b0;
+  --gold: #c9922a;
+  --gold-deep: #a04b16;
+  --red: #b8321f;
+  --frame: #241a10;
+}
+
+html, body { height: 100%; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: var(--frame);
+  color: var(--ink);
+  overflow: hidden;
+}
+
+#app { display: flex; flex-direction: column; height: 100vh; }
+
+/* ---------- 顶栏 ---------- */
+header {
+  display: flex; align-items: center; gap: 14px;
+  padding: 10px 18px;
+  background: linear-gradient(180deg, #2c2114, #241a10);
+  border-bottom: 1px solid #4a3a22;
+  color: #e8d9ae;
+  flex: none;
+}
+header h1 {
+  font-family: "Songti SC", "STSong", "Noto Serif SC", serif;
+  font-size: 22px; font-weight: 700; letter-spacing: 4px; color: #f0d896;
+  text-shadow: 0 1px 0 #000;
+}
+header .sub { font-size: 12px; color: #a08c62; letter-spacing: 2px; }
+.badge {
+  font-size: 11px; padding: 2px 8px; border-radius: 10px; letter-spacing: 1px;
+  border: 1px solid #6d5a35; color: #cdb684; background: rgba(0,0,0,.25);
+}
+.badge.demo { color: #e8b56a; border-color: #8a6a2e; }
+.badge.real { color: #9fd08a; border-color: #4e6b3a; }
+header .spacer { flex: 1; }
+header button {
+  font-size: 13px; padding: 7px 14px; border-radius: 6px; cursor: pointer;
+  border: 1px solid #6d5a35; background: #3a2c18; color: #ecd9a8; letter-spacing: 1px;
+  transition: all .15s;
+}
+header button:hover { background: #4c3a1e; border-color: #8a6a2e; }
+header button.primary {
+  background: linear-gradient(180deg, #b8321f, #8f2313);
+  border-color: #d8623d; color: #ffe9c9; font-weight: 600;
+}
+header button.primary:hover { background: linear-gradient(180deg, #cd3d24, #a02a17); }
+
+/* ---------- 主区 ---------- */
+#main { display: flex; flex: 1; min-height: 0; }
+
+#mapWrap { flex: 1; position: relative; min-width: 0; background: #1a130b; }
+#map { display: block; width: 100%; height: 100%; cursor: grab; }
+#map.dragging { cursor: grabbing; }
+
+#tooltip {
+  position: absolute; pointer-events: none; z-index: 10;
+  background: rgba(26, 18, 9, .93); color: #f0e2ba;
+  border: 1px solid #7a6234; border-radius: 8px;
+  padding: 9px 12px; font-size: 12px; line-height: 1.55;
+  max-width: 240px; display: none; box-shadow: 0 4px 14px rgba(0,0,0,.5);
+}
+#tooltip .t-name { font-size: 13px; font-weight: 700; color: #f5d788; }
+#tooltip .t-line { color: #c9b184; }
+#tooltip .t-hint { color: #8fae6f; margin-top: 2px; }
+
+/* ---------- 侧栏 ---------- */
+#sidebar {
+  width: 322px; flex: none; overflow-y: auto;
+  background: linear-gradient(180deg, #f4ead0, #e9dcbc);
+  border-left: 1px solid #4a3a22;
+  padding: 16px 16px 24px;
+}
+#sidebar h2 {
+  font-family: "Songti SC", "STSong", serif;
+  font-size: 15px; letter-spacing: 3px; color: var(--ink-soft);
+  margin: 18px 0 8px; padding-bottom: 5px;
+  border-bottom: 1px solid #cdbb90;
+}
+#sidebar h2:first-child { margin-top: 0; }
+
+.stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.stat {
+  background: rgba(255,252,242,.65); border: 1px solid #d3c193;
+  border-radius: 8px; padding: 9px 10px;
+}
+.stat .k { font-size: 11px; color: #8a7146; letter-spacing: 1px; }
+.stat .v { font-size: 21px; font-weight: 700; color: #4a3313; font-variant-numeric: tabular-nums; }
+.stat .v small { font-size: 12px; font-weight: 400; color: #8a7146; }
+.stat.wide { grid-column: span 2; }
+
+/* 称号 */
+#titleRow { display: flex; align-items: baseline; justify-content: space-between; margin: 2px 0 5px; }
+#playerTitle { font-family: "Songti SC", "STSong", serif; font-size: 19px; font-weight: 700; color: var(--red); letter-spacing: 2px; }
+#nextTitle { font-size: 11px; color: #8a7146; }
+.bar { height: 10px; border-radius: 5px; background: #d8c8a0; overflow: hidden; border: 1px solid #c2ad7c; }
+.bar > i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, #d99a2b, #f0c355); transition: width .6s ease; }
+.bar.red > i { background: linear-gradient(90deg, #a5281a, #d4552f); }
+
+/* 区县战况 */
+.drow { display: flex; align-items: center; gap: 8px; margin: 5px 0; font-size: 12px; }
+.drow .dn { width: 64px; color: var(--ink-soft); flex: none; }
+.drow .dbar { flex: 1; display: block; min-width: 0; }
+.drow .dbar .bar { display: block; width: 100%; }
+.drow .dv { width: 44px; text-align: right; font-variant-numeric: tabular-nums; color: #7a5f2f; flex: none; }
+
+/* 编年史 */
+#chronicle { list-style: none; font-size: 12.5px; }
+#chronicle li { display: flex; gap: 8px; padding: 4px 0; border-bottom: 1px dashed #d6c59b; }
+#chronicle .cdate { color: #98814e; font-variant-numeric: tabular-nums; flex: none; }
+#chronicle .cname { color: #4a3313; }
+#chronicle .cdist { color: #98814e; margin-left: auto; flex: none; }
+.empty { color: #a08a5c; font-size: 12px; padding: 6px 0; }
+
+/* 图例 */
+#legend { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; font-size: 12px; color: var(--ink-soft); }
+#legend .li { display: flex; align-items: center; gap: 7px; }
+#legend canvas { flex: none; }
+
+/* 横幅 toast */
+#toast {
+  position: fixed; left: 50%; bottom: 34px; transform: translate(-50%, 90px);
+  background: linear-gradient(180deg, #3a2513, #2a1a0c);
+  border: 1px solid #8a6a2e; color: #f5dfa8;
+  padding: 12px 22px; border-radius: 10px; font-size: 14.5px; letter-spacing: 1px;
+  box-shadow: 0 6px 24px rgba(0,0,0,.6); z-index: 50;
+  transition: transform .35s cubic-bezier(.2,1.4,.4,1), opacity .3s; opacity: 0;
+  text-align: center; pointer-events: none;
+}
+#toast.show { transform: translate(-50%, 0); opacity: 1; }
+#toast .big { font-size: 16px; font-weight: 700; color: #ffdd8a; }
+#toast .gain { color: #f0a868; font-size: 13px; margin-top: 2px; }
+
+/* 说明浮层 */
+#help {
+  position: fixed; inset: 0; background: rgba(15,10,4,.72); z-index: 60;
+  display: none; align-items: center; justify-content: center;
+}
+#help.show { display: flex; }
+#help .panel {
+  width: min(560px, 88vw); max-height: 80vh; overflow-y: auto;
+  background: #f2e7ca; border: 1px solid #8a6a2e; border-radius: 12px;
+  padding: 26px 30px; font-size: 13.5px; line-height: 1.75; color: #3d2c14;
+  box-shadow: 0 20px 60px rgba(0,0,0,.7);
+}
+#help .panel h3 { font-family: "Songti SC", serif; letter-spacing: 3px; margin-bottom: 10px; font-size: 17px; }
+#help .panel p { margin: 8px 0; }
+#help .panel .close { margin-top: 14px; }
+#help button { font-size: 13px; padding: 8px 18px; border-radius: 6px; border: 1px solid #8a6a2e; background: #b8321f; color: #ffe9c9; cursor: pointer; }
+
+@media (max-width: 860px) {
+  #sidebar { position: absolute; right: 0; top: 53px; bottom: 0; z-index: 20; width: 300px; box-shadow: -8px 0 24px rgba(0,0,0,.4); transform: translateX(100%); transition: transform .25s; }
+  #sidebar.open { transform: none; }
+  #sbToggle { display: inline-block !important; }
+}
+#sbToggle { display: none; }
