@@ -16,7 +16,9 @@
 
 ## 🔗 在线演示
 
-> **<https://mking-mcd-gate.app.workbuddy.host/>**
+> **v2 麦门制霸图（无需 Token，内置演示数据）：<https://xianglifei.github.io/m-king/>**
+>
+> **v1 金拱门六技能（静态快照）：<https://mking-mcd-gate.app.workbuddy.host/>**
 
 打开就能看到金拱门宫门和六个技能的**真实运行结果**——无需安装、无需配置、无需 MCP Token。
 
