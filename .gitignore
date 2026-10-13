@@ -16,3 +16,6 @@ node_modules/
 kingdom/data/
 __pycache__/
 *.pyc
+
+# 隐私核验报告：正文含真实门店名（≈位置信号），严禁入库
+PRIVACY-FIX-VERIFICATION.md
