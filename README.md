@@ -4,13 +4,33 @@
 
 > 🗺️ **v2 已来：[麦门制霸图](kingdom/README.md)** —— 把全城麦当劳画成一张 Q 版游戏地图，
 > 每真实吃过一家店（打卡），它的整片 Voronoi 领地就从云朵迷雾里点亮。全城制霸，吃遍麦门。
-> 位于 `kingdom/` 目录（`v2-kingdom` 分支），双击 index.html 即玩，纯逻辑层带 25 项零依赖测试。
+> 位于 `kingdom/` 目录（已合入 `main`），双击 `index.html` 即玩；核心逻辑层带 13 项零依赖单测（全仓 26 项）。
 
 **m-king** 是一个建立在麦当劳中国 MCP 之上的可视化技能入口。它不是"点了复制指令、你再回去粘贴"的静态看板——**点击卡片就会真的发起 MCP 调用链，算完把结果渲染回页面**。
 
 <p align="center">
   <em>到店自取 / 得来速 / 麦乐送 三条路真实比价 · 你的积分该换什么 · 你的券值多少钱 · 这一年的麦门账单</em>
 </p>
+
+---
+
+## 🗺️ v2 · 麦门制霸图（新主体）
+
+<p align="center">
+  <a href="https://xianglifei.github.io/m-king/">
+    <img src="references/kingdom-hero.png" alt="麦门制霸图：全城麦当劳被划分为 Voronoi 城邦，已打卡的领地高亮点亮" width="880">
+  </a>
+</p>
+
+把全城麦当劳画成一张 **Q 版游戏地图**：旗舰店是**王都**、商场店是**城镇**、得来速与社区店是**街角甜品站**，每家城邦按 **Voronoi** 划分领地。你**真实吃过**哪家（用餐打卡 / 订单导入），它的整片领地就从云朵迷雾里点亮——**版图占比按领地面积计**（城区密集推进慢、远郊一店一大片），**战功 = 城邦等级分 × 远郊 1.5 倍 + 开疆奖**，另有九级称号、八枚成就徽章与一键生成的战绩分享卡。
+
+<p align="center">
+  <img src="references/kingdom-checkin.gif" alt="用餐打卡：搜索门店 → 打卡 → 邻接领地高亮点亮 + 晋升战报" width="820">
+</p>
+
+> 点亮**只由真实用餐记录驱动**，没有"一键随机点亮"——地图是吃饭的记账本，不是点击游戏。
+> 页面为**零依赖静态应用**（内置虚构演示数据 + 真实北京地标坐标），**双击 `kingdom/index.html` 即玩**；接自己的真实数据见 [kingdom/README.md](kingdom/README.md)。
+> 在线试玩（无需 Token）：**<https://xianglifei.github.io/m-king/>**
 
 ---
 
@@ -28,9 +48,13 @@
 
 ---
 
-## 它长什么样
+## v1 · 金拱门宫门（它长什么样）
 
 页面中间是一座中式宫门造型的麦当劳大房子（朱红墙体 + 金黄琉璃顶 + 发光的金拱正门），左右各守三门技能。顶部和门内是**你账户的实时数据**：可用积分、券包数量、已过期积分、当日活动日历。
+
+<p align="center">
+  <img src="references/gate-v1.png" alt="金拱门宫门：朱红墙体 + 金黄琉璃顶 + 六门技能卡片，顶部为账户实时数据" width="880">
+</p>
 
 点任意一门：
 
@@ -198,8 +222,16 @@ m-king/
 │   ├── mcp.js                # MCP 客户端：JSON-RPC over HTTP，Token 三级回退
 │   ├── modes.js              # 六大模式的真实调用链与计算逻辑（含短 TTL 缓存）
 │   └── sanitize.js           # 演示快照脱敏：门店名称替换、订单时间打码
+├── kingdom/                  # v2 麦门制霸图：零依赖静态应用（index.html 双击即玩）
+│   ├── core.js               #   纯逻辑层：投影 / Voronoi / 计分 / 称号 / 徽章（可单测）
+│   ├── app.js                #   渲染与交互层：canvas / 打卡 / 分享卡 / 持久化
+│   ├── data-demo.js          #   内置演示数据（虚构门店 + 真实北京地标坐标）
+│   └── tools/                #   fetch_mcd_data.py（MCP 桥接）/ gen_demo.py（演示数据生成）
 ├── references/
-│   └── modes.md              # 每个模式的取数与算法细节（按需查阅）
+│   ├── modes.md              # 每个模式的取数与算法细节（按需查阅）
+│   ├── kingdom-hero.png      # v2 制霸图总览截图（README 用）
+│   ├── kingdom-checkin.gif   # v2 用餐打卡点亮流程录屏（README 用）
+│   └── gate-v1.png           # v1 金拱门宫门截图（README 用）
 ├── scripts/
 │   └── build-demo.js         # 生成静态快照 Demo（demo/index.html，自动脱敏）
 ├── test/                     # node:test 测试：纯函数 + server 安全基线

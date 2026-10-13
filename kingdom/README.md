@@ -10,6 +10,8 @@
 
 ![玩法示意](../references/kingdom-preview.png)
 
+![用餐打卡：搜索门店 → 打卡 → 领地亮点亮 + 晋升战报](../references/kingdom-checkin.gif)
+
 ## 它解决什么
 
 「吃过哪些麦当劳」本来只是一串订单记录。这张图把它变成三件事：
@@ -36,13 +38,13 @@
 open kingdom/index.html          # 或双击，file:// 可用
 
 # 方式二：起本地服务（支持滚轮缩放/拖拽平移）
-python3 -m http.server 8799 --directory kingdom
-# 浏览器打开 http://127.0.0.1:8799/
+python3 -m http.server 8801 --directory kingdom
+# 浏览器打开 http://127.0.0.1:8801/
 
 # 方式三：接入你的真实数据（需要麦当劳 MCP Token）
 export MCD_MCP_TOKEN=你的Token    # 与 WorkBuddy mcp.json 中 mcd-mcp 相同
 python3 kingdom/tools/fetch_mcd_data.py
-python3 -m http.server 8799 --directory kingdom   # 刷新即见你的真实王国
+python3 -m http.server 8801 --directory kingdom   # 刷新即见你的真实王国
 ```
 
 ## 真实数据怎么来
@@ -95,7 +97,7 @@ kingdom/
 │   └── fetch_mcd_data.py # 真实数据桥接（MCP → data/*.json）
 └── data/                 # 真实数据输出目录（gitignore，不存在则自动用演示数据）
 
-test/kingdom/core.test.js # 12 项零依赖单测（npm test 一并执行，全仓 25 项）
+test/kingdom/core.test.js # 13 项零依赖单测（npm test 一并执行，全仓 26 项）
 ```
 
 ## 与旧版（六门技能）的关系
